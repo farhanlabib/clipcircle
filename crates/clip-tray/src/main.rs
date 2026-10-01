@@ -11,9 +11,10 @@ use clip_core::history::Content;
 use clip_core::service::{self, Options, Service};
 use clip_core::State;
 use serde::Serialize;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Listener, Manager, WindowEvent};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tokio::sync::Mutex;
 
 struct App {
@@ -176,6 +177,29 @@ async fn copy_history(index: usize, app: tauri::State<'_, App>) -> CmdResult<()>
         .map_err(err)
 }
 
+/// Whether the app starts when the user logs in.
+#[tauri::command]
+fn autostart(handle: AppHandle) -> CmdResult<bool> {
+    handle.autolaunch().is_enabled().map_err(err)
+}
+
+#[tauri::command]
+fn set_autostart(enabled: bool, handle: AppHandle) -> CmdResult<()> {
+    apply_autostart(&handle, enabled)
+}
+
+fn apply_autostart(handle: &AppHandle, enabled: bool) -> CmdResult<()> {
+    let launcher = handle.autolaunch();
+    if enabled {
+        launcher.enable()
+    } else {
+        launcher.disable()
+    }
+    .map_err(err)?;
+    let _ = handle.emit("autostart-changed", enabled);
+    Ok(())
+}
+
 fn show_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -196,6 +220,10 @@ fn main() {
         .unwrap_or_else(|| State::default_path().expect("no config directory"));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(App {
             state_path,
             service: Mutex::new(None),
@@ -207,7 +235,9 @@ fn main() {
             remove_device,
             set_paused,
             history,
-            copy_history
+            copy_history,
+            autostart,
+            set_autostart
         ])
         .setup(|app| {
             // A menu bar app on macOS: no Dock icon.
@@ -217,10 +247,19 @@ fn main() {
             let open =
                 MenuItem::with_id(app, "open", "Open Universal Clipboard", true, None::<&str>)?;
             let pause = MenuItem::with_id(app, "pause", "Pause syncing", true, None::<&str>)?;
+            let at_login = CheckMenuItem::with_id(
+                app,
+                "autostart",
+                "Start at login",
+                true,
+                app.autolaunch().is_enabled().unwrap_or(false),
+                None::<&str>,
+            )?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &pause, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &pause, &at_login, &quit])?;
 
             let pause_item = pause.clone();
+            let at_login_item = at_login.clone();
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().expect("app icon"))
                 .tooltip("Universal Clipboard")
@@ -244,6 +283,14 @@ fn main() {
                             });
                             let _ = app.emit("paused-changed", paused);
                         });
+                    }
+                    "autostart" => {
+                        // The check mark has already flipped; make it so.
+                        let enabled = at_login_item.is_checked().unwrap_or(false);
+                        if let Err(e) = apply_autostart(app, enabled) {
+                            tracing::warn!("could not change start at login: {e}");
+                            let _ = at_login_item.set_checked(!enabled);
+                        }
                     }
                     "quit" => app.exit(0),
                     _ => {}
@@ -269,6 +316,10 @@ fn main() {
                 } else {
                     "Pause syncing"
                 });
+            });
+
+            app.listen("autostart-changed", move |event| {
+                let _ = at_login.set_checked(event.payload() == "true");
             });
 
             let handle = app.handle().clone();

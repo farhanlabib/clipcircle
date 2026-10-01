@@ -119,6 +119,16 @@ $("join-panel").onsubmit = async (ev) => {
   }
 };
 
+async function refreshAutostart() {
+  try { $("autostart-toggle").checked = await invoke("autostart"); } catch (e) { showError(e); }
+}
+
+$("autostart-toggle").onchange = async (ev) => {
+  try { await invoke("set_autostart", { enabled: ev.target.checked }); }
+  catch (e) { showError(e); }
+  refreshAutostart();
+};
+
 listen("paired", (ev) => {
   $("pair-status").textContent = `${ev.payload} joined your circle.`;
   refreshStatus();
@@ -126,8 +136,10 @@ listen("paired", (ev) => {
 listen("pairing-failed", (ev) => { $("pair-status").textContent = `Pairing failed: ${ev.payload}`; });
 listen("paused-changed", refreshStatus);
 listen("service-error", (ev) => showError(ev.payload));
+listen("autostart-changed", refreshAutostart);
 
 refreshStatus();
 refreshHistory();
+refreshAutostart();
 setInterval(refreshHistory, 2000);
 setInterval(refreshStatus, 5000);

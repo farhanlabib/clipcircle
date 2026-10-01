@@ -39,7 +39,9 @@ turns it off). Only text is kept, at most 50 entries, in a file only you can rea
 `crates/clip-tray` is a menu bar (macOS) / system tray (Windows, Linux) app
 built with Tauri. It runs syncing in the background and has a small window to
 add a device (shows a pairing code), join a circle (type a code), remove
-devices, pause syncing, and click a recent clip to copy it again.
+devices, pause syncing, and click a recent clip to copy it again. Turn on
+**Start at login** (in the window or the tray menu) to have it start with
+your computer; it is off until you turn it on.
 
 ```sh
 cargo run -p clip-tray --release
