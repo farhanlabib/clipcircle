@@ -1,7 +1,7 @@
 //! Finding circle members and pairing hosts on the local network with mDNS.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -28,6 +28,22 @@ pub fn advertise(
     Ok(daemon)
 }
 
+/// Addresses worth connecting to, IPv4 first. IPv6 link-local addresses are
+/// dropped: mDNS reports them without a scope id, so connecting fails with
+/// "no route to host".
+pub fn dialable_addrs(ips: impl IntoIterator<Item = IpAddr>, port: u16) -> Vec<SocketAddr> {
+    let mut addrs: Vec<SocketAddr> = ips
+        .into_iter()
+        .filter(|ip| match ip {
+            IpAddr::V4(_) => true,
+            IpAddr::V6(v6) => !v6.is_unicast_link_local(),
+        })
+        .map(|ip| SocketAddr::new(ip, port))
+        .collect();
+    addrs.sort_by_key(|a| (a.is_ipv6(), *a));
+    addrs
+}
+
 /// Keeps `peers` filled with devices advertising the given circle.
 pub fn browse_circle(circle_id: String, self_id: String, peers: PeerMap) -> Result<ServiceDaemon> {
     let daemon = ServiceDaemon::new()?;
@@ -42,14 +58,15 @@ pub fn browse_circle(circle_id: String, self_id: String, peers: PeerMap) -> Resu
                     if circle != Some(circle_id.as_str()) || device == self_id {
                         continue;
                     }
-                    let addrs: Vec<SocketAddr> = info
-                        .get_addresses()
-                        .iter()
-                        .map(|ip| SocketAddr::new(*ip, info.get_port()))
-                        .collect();
-                    tracing::info!(device, ?addrs, "found circle device");
+                    let addrs = dialable_addrs(info.get_addresses().iter().copied(), info.get_port());
                     by_fullname.insert(info.get_fullname().to_owned(), device.to_owned());
-                    peers.lock().unwrap().insert(device.to_owned(), addrs);
+                    let previous = peers.lock().unwrap().insert(device.to_owned(), addrs.clone());
+                    // mDNS re-resolves once per address; only log real changes.
+                    if previous.as_ref() != Some(&addrs) {
+                        tracing::info!(device, ?addrs, "found circle device");
+                    } else {
+                        tracing::debug!(device, "circle device re-resolved");
+                    }
                 }
                 ServiceEvent::ServiceRemoved(_, fullname) => {
                     if let Some(device) = by_fullname.remove(&fullname) {
@@ -83,5 +100,21 @@ pub async fn find_pairing_host(timeout: Duration) -> Result<SocketAddr> {
     match found {
         Ok(Some(addr)) => Ok(addr),
         _ => bail!("no device is showing a pairing code on this network"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dialable_addrs_drops_link_local_and_puts_ipv4_first() {
+        let ips: Vec<IpAddr> = ["fe80::1", "fd00::5", "192.168.31.67", "fe80::abcd"]
+            .iter()
+            .map(|s| s.parse().unwrap())
+            .collect();
+        let addrs = dialable_addrs(ips, 47800);
+        let got: Vec<String> = addrs.iter().map(|a| a.to_string()).collect();
+        assert_eq!(got, ["192.168.31.67:47800", "[fd00::5]:47800"]);
     }
 }
