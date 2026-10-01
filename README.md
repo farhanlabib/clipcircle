@@ -49,6 +49,24 @@ It uses the same state file as `clipd` (`CLIPD_STATE` overrides the path), so
 don't run both at once. On Linux it needs the WebKitGTK and appindicator
 libraries; see `.github/workflows/ci.yml` for the package list.
 
+### Installers
+
+The **Installers** workflow builds the tray app for every push to `main`:
+open the latest run under Actions and download the artifact for your system.
+
+| Artifact | Contains |
+|---|---|
+| `universal-clipboard-macos` | `.dmg` (Apple silicon and Intel) |
+| `universal-clipboard-windows` | `.msi` and setup `.exe` |
+| `universal-clipboard-linux` | `.deb` and `.AppImage` |
+
+The builds are not signed yet. On macOS, right-click the app and choose
+**Open** the first time (or run `xattr -dr com.apple.quarantine
+"/Applications/Universal Clipboard.app"`). On Windows, click **More info**,
+then **Run anyway** in the SmartScreen prompt.
+
+To build one locally: `cd crates/clip-tray && npx @tauri-apps/cli@2 build`.
+
 ## Android app
 
 `android/` is a small Android app (Android 10+) on top of `crates/clip-ffi`,
