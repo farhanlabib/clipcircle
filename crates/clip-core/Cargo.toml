@@ -1,0 +1,21 @@
+[package]
+name = "clip-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+snow = "0.10"
+spake2 = "0.4"
+mdns-sd = "0.13"
+arboard = { version = "3", default-features = false }
+rand = "0.8"
+hex = "0.4"
+sha2 = "0.10"
+dirs = "5"
+gethostname = "0.5"
+tracing = "0.1"
