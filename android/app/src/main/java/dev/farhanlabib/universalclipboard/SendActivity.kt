@@ -82,7 +82,7 @@ class SendActivity : Activity() {
             done("Nothing to send")
             return
         }
-        send { clipApp.node.sendFiles(ReceivedFiles.read(this, uris)) }
+        send { clipApp.node.sendFiles(ReceivedFiles.copyForSending(this, uris)) }
     }
 
     private fun sendText(text: String?) {

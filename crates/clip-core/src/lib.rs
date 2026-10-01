@@ -11,6 +11,7 @@ pub mod protocol;
 pub mod service;
 pub mod state;
 pub mod sync;
+pub mod transfer;
 pub mod transport;
 
 pub use state::{Member, State};

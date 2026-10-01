@@ -26,9 +26,11 @@ clipd run
 ```
 
 Copy text, an image or files on one device and paste on the other. Files
-(not folders) copied in Finder, Explorer or a Linux file manager are sent
-when they total 32 MiB or less; on the other device they are saved under the
-temp folder and pasting in the file manager copies them where you want. `clipd devices`
+(not folders) copied in Finder, Explorer or a Linux file manager are sent,
+up to 4 GiB at a time. They stream from disk to disk, so size doesn't cost
+memory. On the other device they are saved under the temp folder (the last
+three batches are kept) and pasting in the file manager copies them where you want.
+If you copy something else before big files finish arriving, your copy stays. `clipd devices`
 lists the circle; `clipd remove <name or id>` takes a device out of it.
 `clipd history` lists the last clips copied or received while `clipd run` was
 running (`--copy N` puts one back, `--clear` deletes it, `run --no-history`
@@ -86,7 +88,7 @@ clipboard. Files copied on a computer are saved to Downloads/Universal
 Clipboard, put on the clipboard, and announced in a notification. Android only
 lets the app in front read the clipboard, so to send from the phone tap **Send
 clipboard** in the app or the notification, or share text, an image or files
-(up to 32 MB) to **Send to my devices**. Photos larger than 4096 pixels on
+to **Send to my devices**. Photos larger than 4096 pixels on
 a side are scaled down before sending.
 
 CI builds a debug APK on every push (download it from the run's artifacts).
@@ -117,4 +119,4 @@ Code layout:
 
 - A removal only spreads when a member that knows about it syncs with the others, and a removed device that pairs again through a member that hasn't heard yet can be removed again by gossip.
 - Images are read from the clipboard on every poll, which costs more than text for big images.
-- One connection per push, and files travel in one message, so file sync is capped at 32 MiB.
+- One connection per push, so a big file goes to each device separately and there is no progress shown yet.

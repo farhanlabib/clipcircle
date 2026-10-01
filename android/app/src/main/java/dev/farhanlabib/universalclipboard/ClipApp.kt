@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import java.util.concurrent.Executors
 import uniffi.clip_ffi.ClipListener
 import uniffi.clip_ffi.Node
@@ -18,6 +19,9 @@ class ClipApp : Application() {
 
     /** Single background thread for every Node call. */
     val worker = Executors.newSingleThreadExecutor()
+
+    /** Moves received files to Downloads without holding up the node. */
+    private val saver = Executors.newSingleThreadExecutor()
 
     private val main = Handler(Looper.getMainLooper())
 
@@ -43,8 +47,11 @@ class ClipApp : Application() {
             }
 
             override fun onFiles(files: List<SharedFile>) {
-                val uris = ReceivedFiles.save(this@ClipApp, files)
-                main.post { ReceivedFiles.announce(this@ClipApp, files.map { it.name }, uris) }
+                saver.execute {
+                    runCatching { ReceivedFiles.save(this@ClipApp, files) }
+                        .onSuccess { uris -> main.post { ReceivedFiles.announce(this@ClipApp, files.map { it.name }, uris) } }
+                        .onFailure { Log.w("ClipApp", "could not save received files", it) }
+                }
             }
 
             override fun onPaired(deviceName: String) {

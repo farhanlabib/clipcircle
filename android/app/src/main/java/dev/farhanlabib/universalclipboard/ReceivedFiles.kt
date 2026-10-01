@@ -15,18 +15,19 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
+import java.io.File
 import uniffi.clip_ffi.SharedFile
 
 /** Files copied on another device: saved to Downloads, put on the clipboard. */
 object ReceivedFiles {
-    /** Shared files may total at most this much (the core's limit). */
-    const val MAX_BYTES = 32L * 1024 * 1024
-
     private const val FOLDER = "Universal Clipboard"
     private const val CHANNEL = "files"
     private const val NOTIFICATION_ID = 2
 
-    /** Saves [files] under Downloads/Universal Clipboard and returns their URIs. */
+    /**
+     * Moves [files] (received into app storage) to Downloads/Universal Clipboard
+     * and returns their URIs.
+     */
     fun save(context: Context, files: List<SharedFile>): List<Uri> {
         val resolver = context.contentResolver
         return files.map { f ->
@@ -38,7 +39,9 @@ object ReceivedFiles {
             }
             val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 ?: error("could not save ${f.name}")
-            resolver.openOutputStream(uri)!!.use { it.write(f.data) }
+            val source = File(f.path)
+            resolver.openOutputStream(uri)!!.use { out -> source.inputStream().use { it.copyTo(out) } }
+            source.delete()
             values.clear()
             values.put(MediaStore.Downloads.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
@@ -77,28 +80,23 @@ object ReceivedFiles {
         )
     }
 
-    /** Reads shared or copied files, refusing more than [MAX_BYTES] before reading. */
-    fun read(context: Context, uris: List<Uri>): List<SharedFile> {
+    /**
+     * Copies shared or copied files into app storage, which the core sends
+     * from. The previous batch is deleted first; its sends are long done.
+     */
+    fun copyForSending(context: Context, uris: List<Uri>): List<SharedFile> {
         val resolver = context.contentResolver
-        val named = uris.map { uri ->
+        val dir = File(context.cacheDir, "outgoing")
+        dir.deleteRecursively()
+        return uris.mapIndexed { i, uri ->
             var name: String? = null
-            var size = -1L
-            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
-                ?.use { c ->
-                    if (c.moveToFirst()) {
-                        name = c.getString(0)
-                        if (!c.isNull(1)) size = c.getLong(1)
-                    }
-                }
-            Triple(uri, name ?: uri.lastPathSegment ?: "file", size)
-        }
-        require(named.sumOf { maxOf(it.third, 0L) } <= MAX_BYTES) { "files over 32 MB can't be sent yet" }
-        var total = 0L
-        return named.map { (uri, name, _) ->
-            val data = resolver.openInputStream(uri)!!.use { it.readBytes() }
-            total += data.size
-            require(total <= MAX_BYTES) { "files over 32 MB can't be sent yet" }
-            SharedFile(name, data)
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) name = c.getString(0)
+            }
+            // One folder per file keeps the copies apart when names repeat.
+            val copy = File(File(dir, i.toString()).apply { mkdirs() }, "file")
+            resolver.openInputStream(uri)!!.use { input -> copy.outputStream().use { input.copyTo(it) } }
+            SharedFile(name ?: uri.lastPathSegment ?: "file", copy.path)
         }
     }
 

@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use clip_core::clipboard::{self, Clip, Clipboard, FileData};
+use clip_core::clipboard::{self, Clip, Clipboard, FileRef};
 use clip_core::service::{self, Options, Service};
 use clip_core::State;
 
@@ -40,7 +40,8 @@ pub trait ClipListener: Send + Sync {
     fn on_clip(&self, text: String);
     /// An image arrived from the circle, as PNG bytes.
     fn on_image(&self, png: Vec<u8>);
-    /// Files copied on another device arrived. Names are bare file names.
+    /// Files copied on another device arrived, in app storage. Names are bare
+    /// file names. The app may move or delete the files.
     fn on_files(&self, files: Vec<SharedFile>);
     /// A device joined with the pairing code being shown.
     fn on_paired(&self, device_name: String);
@@ -48,10 +49,11 @@ pub trait ClipListener: Send + Sync {
     fn on_pairing_failed(&self, message: String);
 }
 
+/// A file on the device's own storage.
 #[derive(uniffi::Record)]
 pub struct SharedFile {
     pub name: String,
-    pub data: Vec<u8>,
+    pub path: String,
 }
 
 #[derive(uniffi::Record)]
@@ -81,7 +83,7 @@ impl Clipboard for AppClipboard {
                     .iter()
                     .map(|f| SharedFile {
                         name: f.name.clone(),
-                        data: f.data.clone(),
+                        path: f.path.to_string_lossy().into_owned(),
                     })
                     .collect(),
             ),
@@ -95,6 +97,7 @@ impl Clipboard for AppClipboard {
 pub struct Node {
     runtime: tokio::runtime::Runtime,
     state_path: PathBuf,
+    received_dir: PathBuf,
     listener: Arc<dyn ClipListener>,
     service: Mutex<Option<Service>>,
 }
@@ -113,13 +116,15 @@ impl Node {
             .worker_threads(2)
             .build()
             .map_err(anyhow::Error::from)?;
-        let state_path = PathBuf::from(data_dir).join("state.json");
+        let data_dir = PathBuf::from(data_dir);
+        let state_path = data_dir.join("state.json");
         if !state_path.exists() {
             State::generate(device_name)?.save(&state_path)?;
         }
         Ok(Arc::new(Self {
             runtime,
             state_path,
+            received_dir: data_dir.join("received"),
             listener,
             service: Mutex::new(None),
         }))
@@ -135,6 +140,7 @@ impl Node {
         });
         let options = Options {
             watch_clipboard: false,
+            received_dir: Some(self.received_dir.clone()),
             ..Options::default()
         };
         let started =
@@ -186,31 +192,26 @@ impl Node {
         Ok(())
     }
 
-    /// Sends files the user shared, up to 32 MiB in total. Names are cleaned
-    /// up into bare file names.
+    /// Sends files the user shared. Each `path` must stay readable until
+    /// the devices have it, so pass copies the app owns. Names are cleaned up
+    /// into bare file names.
     pub fn send_files(&self, files: Vec<SharedFile>) -> Result<()> {
         if files.is_empty() {
             return Err(anyhow::anyhow!("no files to send").into());
         }
-        let total: usize = files.iter().map(|f| f.data.len()).sum();
-        if total > clipboard::MAX_FILES_BYTES {
+        let files = files
+            .iter()
+            .map(|f| FileRef::named(&clean_file_name(&f.name), f.path.as_ref()))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        if files.iter().map(|f| f.size).sum::<u64>() > clipboard::MAX_FILES_BYTES {
             return Err(anyhow::anyhow!(
-                "files larger than {} MiB can't be sent yet",
-                clipboard::MAX_FILES_BYTES >> 20
+                "files larger than {} GiB in total can't be sent",
+                clipboard::MAX_FILES_BYTES >> 30
             )
             .into());
         }
-        let clip = Clip::Files(
-            files
-                .into_iter()
-                .map(|f| FileData {
-                    name: clean_file_name(&f.name),
-                    data: f.data,
-                })
-                .collect(),
-        );
         let engine = self.engine()?;
-        self.runtime.block_on(engine.send_local(clip));
+        self.runtime.block_on(engine.send_local(Clip::Files(files)));
         Ok(())
     }
 

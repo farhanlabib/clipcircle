@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use clip_core::clipboard::{Clip, Clipboard, FileData, MemoryClipboard};
+use clip_core::clipboard::{Clip, Clipboard, FileRef, MemoryClipboard};
 use clip_core::sync::{Engine, Reach};
 use clip_core::{pairing, State};
 use tokio::net::{TcpListener, TcpStream};
@@ -158,30 +158,91 @@ async fn files_reach_the_other_device() {
     let mut b = State::generate("windows").unwrap();
     pair(&mut a, &mut b, "555555", "555555").await.unwrap();
 
-    let clip_b = MemoryClipboard::default();
-    let (_engine_b, addr_b) = serve(b, clip_b.clone()).await;
-    let engine_a = Engine::new(a, None, Box::new(MemoryClipboard::default()));
+    let tmp = std::env::temp_dir().join(format!("clip-e2e-files-{}", std::process::id()));
+    let (sent, received) = (tmp.join("sent"), tmp.join("received"));
+    std::fs::create_dir_all(sent.join("other")).unwrap();
+    // Bigger than one streamed block, an empty file, and two files with the
+    // same name from different folders.
+    let contents: [(&str, Vec<u8>); 4] = [
+        ("notes.txt", b"hello".to_vec()),
+        (
+            "data.bin",
+            (0..3_000_000).map(|i| (i % 253) as u8).collect(),
+        ),
+        ("empty", Vec::new()),
+        ("other/notes.txt", b"second".to_vec()),
+    ];
+    let mut files = Vec::new();
+    for (name, data) in &contents {
+        let path = sent.join(name);
+        std::fs::write(&path, data).unwrap();
+        files.push(FileRef::from_path(&path).unwrap());
+    }
 
-    let files = Clip::Files(vec![
-        FileData {
-            name: "notes.txt".into(),
-            data: b"hello".to_vec(),
-        },
-        FileData {
-            name: "data.bin".into(),
-            data: (0..100_000).map(|i| (i % 253) as u8).collect(),
-        },
-    ]);
-    engine_a.push(addr_b, &files).await.unwrap();
+    let clip_b = MemoryClipboard::default();
+    let engine_b =
+        Engine::new(b, None, Box::new(clip_b.clone())).with_received_dir(received.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr_b = listener.local_addr().unwrap();
+    let e = engine_b.clone();
+    tokio::spawn(async move { e.serve(listener).await });
+    let engine_a = Engine::new(a, None, Box::new(MemoryClipboard::default()));
+    engine_a.push(addr_b, &Clip::Files(files)).await.unwrap();
 
     let mut clip_b = clip_b;
+    let mut got = None;
     for _ in 0..40 {
-        if clip_b.get().as_ref() == Some(&files) {
-            return;
+        if let Some(Clip::Files(f)) = clip_b.get() {
+            got = Some(f);
+            break;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    panic!("files never arrived");
+    let got = got.expect("files never arrived");
+    let names: Vec<&str> = got.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["notes.txt", "data.bin", "empty", "notes (2).txt"]);
+    for (f, (_, data)) in got.iter().zip(&contents) {
+        assert!(f.path.starts_with(&received), "{}", f.path.display());
+        assert_eq!(f.size, data.len() as u64);
+        assert_eq!(&std::fs::read(&f.path).unwrap(), data);
+    }
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[tokio::test]
+async fn files_that_change_while_sending_are_dropped() {
+    let mut a = State::generate("mac").unwrap();
+    let mut b = State::generate("windows").unwrap();
+    pair(&mut a, &mut b, "565656", "565656").await.unwrap();
+
+    let tmp = std::env::temp_dir().join(format!("clip-e2e-shrunk-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let path = tmp.join("log.txt");
+    std::fs::write(&path, vec![b'x'; 2_000_000]).unwrap();
+    let file = FileRef::from_path(&path).unwrap();
+    std::fs::write(&path, b"truncated").unwrap();
+
+    let received = tmp.join("received");
+    let clip_b = MemoryClipboard::default();
+    let engine_b =
+        Engine::new(b, None, Box::new(clip_b.clone())).with_received_dir(received.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr_b = listener.local_addr().unwrap();
+    let e = engine_b.clone();
+    tokio::spawn(async move { e.serve(listener).await });
+    let engine_a = Engine::new(a, None, Box::new(MemoryClipboard::default()));
+
+    assert!(engine_a
+        .push(addr_b, &Clip::Files(vec![file]))
+        .await
+        .is_err());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let mut clip_b = clip_b;
+    assert_eq!(clip_b.get(), None);
+    // The partial file was cleaned up.
+    let left = std::fs::read_dir(&received).map(|d| d.count()).unwrap_or(0);
+    assert_eq!(left, 0);
+    std::fs::remove_dir_all(&tmp).unwrap();
 }
 
 #[tokio::test]

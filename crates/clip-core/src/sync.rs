@@ -2,7 +2,8 @@
 //! circle member, and apply changes pushed to us.
 //!
 //! Each push is its own short connection (XX handshake, Hello both ways, one
-//! Clip). That keeps the engine stateless; long-lived connections can come later.
+//! Clip, and for files their contents). That keeps the engine stateless;
+//! long-lived connections can come later.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -14,10 +15,11 @@ use anyhow::{bail, Context, Result};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
-use crate::clipboard::{Clip, Clipboard, WireClip};
+use crate::clipboard::{Clip, Clipboard, FileRef, WireClip};
 use crate::discovery::PeerMap;
 use crate::history::{Entry, History};
 use crate::protocol::Message;
+use crate::transfer;
 use crate::transport::{self, SecureStream};
 use crate::State;
 
@@ -82,6 +84,8 @@ pub struct Engine {
     history: Option<Arc<std::sync::Mutex<History>>>,
     /// While set, nothing is sent and incoming clips are refused.
     paused: Arc<AtomicBool>,
+    /// Received files are written to a new folder in here.
+    received_dir: PathBuf,
 }
 
 impl Engine {
@@ -94,7 +98,14 @@ impl Engine {
             peers: PeerMap::default(),
             history: None,
             paused: Arc::new(AtomicBool::new(false)),
+            received_dir: transfer::default_received_dir(),
         }
+    }
+
+    /// Keeps received files in `dir` instead of the temp directory.
+    pub fn with_received_dir(mut self, dir: PathBuf) -> Self {
+        self.received_dir = dir;
+        self
     }
 
     pub fn set_paused(&self, paused: bool) {
@@ -195,6 +206,7 @@ impl Engine {
 
     pub async fn broadcast(&self, clip: &Clip) {
         // Encode once (PNG for images) and share it with every push.
+        let files = Arc::new(files_of(clip).to_vec());
         let clip = clip.clone();
         let wire = match tokio::task::spawn_blocking(move || clip.to_wire()).await {
             Ok(Ok(wire)) => Arc::new(wire),
@@ -211,9 +223,10 @@ impl Engine {
         for (device, addrs) in targets {
             let engine = self.clone();
             let wire = wire.clone();
+            let files = files.clone();
             tokio::spawn(async move {
                 for addr in addrs {
-                    match engine.push_wire(addr, &wire).await {
+                    match engine.push_wire(addr, &wire, &files).await {
                         Ok(()) => return tracing::debug!(device, %addr, "pushed clip"),
                         Err(e) => tracing::debug!(device, %addr, "push failed: {e:#}"),
                     }
@@ -225,12 +238,23 @@ impl Engine {
 
     /// Sends `clip` to the device at `addr`.
     pub async fn push(&self, addr: SocketAddr, clip: &Clip) -> Result<()> {
-        self.push_wire(addr, &clip.to_wire()?).await
+        self.push_wire(addr, &clip.to_wire()?, files_of(clip)).await
     }
 
-    async fn push_wire(&self, addr: SocketAddr, wire: &WireClip) -> Result<()> {
+    async fn push_wire(&self, addr: SocketAddr, wire: &WireClip, files: &[FileRef]) -> Result<()> {
         let (mut chan, _) = self.connect(addr).await?;
-        chan.send_json(&Message::Clip { clip: wire.clone() }).await
+        chan.send_json(&Message::Clip { clip: wire.clone() })
+            .await?;
+        if files.is_empty() {
+            return Ok(());
+        }
+        transfer::send(&mut chan, files).await?;
+        match tokio::time::timeout(transfer::STALL_TIMEOUT, chan.recv_json()).await {
+            Ok(Ok(Message::Received)) => Ok(()),
+            Ok(Ok(_)) => bail!("expected received message"),
+            Ok(Err(e)) => Err(e.context("files were not received")),
+            Err(_) => bail!("no answer after sending the files"),
+        }
     }
 
     /// Opens a sync connection to `addr`: handshake, membership check and
@@ -319,10 +343,24 @@ impl Engine {
         if self.is_paused() {
             bail!("syncing is paused");
         }
-        let clip = tokio::task::spawn_blocking(move || Clip::from_wire(clip)).await??;
+        // Files can take a while; what was copied here in the meantime wins.
+        let mut copied_before = None;
+        let clip = match clip {
+            WireClip::Files { files } => {
+                copied_before = Some(*self.last.lock().await);
+                let files = transfer::receive(&mut chan, &files, &self.received_dir).await?;
+                chan.send_json(&Message::Received).await?;
+                Clip::Files(files)
+            }
+            wire => tokio::task::spawn_blocking(move || Clip::from_wire(wire)).await??,
+        };
         tracing::info!(from, bytes = clip.len(), "received clip");
         self.record(&from, &clip);
         let mut last = self.last.lock().await;
+        if copied_before.is_some_and(|before| before != *last) {
+            tracing::info!("not pasting received files: something newer was copied");
+            return Ok(());
+        }
         let mut clipboard = self.clipboard.lock().await;
         let digest = clip.digest();
         // Already on our clipboard (e.g. both sides copied it at once): writing it
@@ -390,5 +428,12 @@ impl Engine {
 
     pub async fn state(&self) -> State {
         self.state.lock().await.clone()
+    }
+}
+
+fn files_of(clip: &Clip) -> &[FileRef] {
+    match clip {
+        Clip::Files(files) => files,
+        _ => &[],
     }
 }

@@ -26,4 +26,6 @@ pub enum Message {
     Clip { clip: WireClip },
     /// Sync: a connection check; sent instead of a clip and needs no answer.
     Ping,
+    /// Sync: the files listed in a clip all arrived.
+    Received,
 }

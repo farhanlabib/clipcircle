@@ -27,6 +27,8 @@ pub struct Options {
     /// [`Engine::send_local`] instead.
     pub watch_clipboard: bool,
     pub history: bool,
+    /// Where received files are kept; a folder in the temp directory if unset.
+    pub received_dir: Option<PathBuf>,
 }
 
 impl Default for Options {
@@ -35,6 +37,7 @@ impl Default for Options {
             port: DEFAULT_PORT,
             watch_clipboard: true,
             history: true,
+            received_dir: None,
         }
     }
 }
@@ -65,6 +68,9 @@ impl Service {
         let mut engine = Engine::new(state.clone(), Some(state_path), clipboard);
         if options.history {
             engine = engine.with_history(History::load(&history_path)?);
+        }
+        if let Some(dir) = options.received_dir {
+            engine = engine.with_received_dir(dir);
         }
         let advertiser = discovery::advertise(
             SYNC_SERVICE,

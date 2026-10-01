@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context, Result};
@@ -5,9 +6,9 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Files copied together may hold at most this many bytes in total, so they
-/// fit in one message after base64.
-pub const MAX_FILES_BYTES: usize = 32 * 1024 * 1024;
+/// Files copied together may hold at most this many bytes in total. They are
+/// streamed from disk to disk, so this only guards the receiver's disk.
+pub const MAX_FILES_BYTES: u64 = 4 << 30;
 
 /// Something on the clipboard, as read from or written to the OS.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,15 +20,46 @@ pub enum Clip {
         height: usize,
         rgba: Vec<u8>,
     },
-    /// Files copied in a file manager (not folders), with their contents.
-    Files(Vec<FileData>),
+    /// Files copied in a file manager (not folders). Their contents stay on
+    /// disk and are read only while sending.
+    Files(Vec<FileRef>),
 }
 
+/// A file on disk, as copied or as received.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileData {
-    /// A bare file name, never a path.
+pub struct FileRef {
+    /// A bare file name, never a path. Usually the last part of `path`.
     pub name: String,
-    pub data: Vec<u8>,
+    pub size: u64,
+    pub path: PathBuf,
+}
+
+impl FileRef {
+    /// Refers to the file at `path` under its own name.
+    pub fn from_path(path: &Path) -> Result<Self> {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .with_context(|| format!("unusable file name {}", path.display()))?;
+        Self::named(name, path)
+    }
+
+    /// Refers to the file at `path`, to be sent as `name`.
+    pub fn named(name: &str, path: &Path) -> Result<Self> {
+        if !is_safe_file_name(name) {
+            bail!("unusable file name {name:?}");
+        }
+        let meta =
+            std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?;
+        if !meta.is_file() {
+            bail!("{} is not a file (folders are not synced)", path.display());
+        }
+        Ok(Self {
+            name: name.to_owned(),
+            size: meta.len(),
+            path: path.to_owned(),
+        })
+    }
 }
 
 /// Whether `name` can be used as a file name without escaping a directory.
@@ -57,13 +89,16 @@ impl Clip {
                 h.update((*height as u64).to_be_bytes());
                 h.update(rgba);
             }
+            // Contents are not hashed: that would mean reading every copied
+            // file each poll. The path and size tell copies apart well enough.
             Clip::Files(files) => {
                 h.update(b"files\0");
                 for f in files {
-                    h.update((f.name.len() as u64).to_be_bytes());
-                    h.update(f.name.as_bytes());
-                    h.update((f.data.len() as u64).to_be_bytes());
-                    h.update(&f.data);
+                    for part in [f.name.as_bytes(), f.path.as_os_str().as_encoded_bytes()] {
+                        h.update((part.len() as u64).to_be_bytes());
+                        h.update(part);
+                    }
+                    h.update(f.size.to_be_bytes());
                 }
             }
         }
@@ -74,7 +109,7 @@ impl Clip {
         match self {
             Clip::Text(t) => t.len(),
             Clip::Image { rgba, .. } => rgba.len(),
-            Clip::Files(files) => files.iter().map(|f| f.data.len()).sum(),
+            Clip::Files(files) => files.iter().map(|f| f.size as usize).sum(),
         }
     }
 
@@ -100,6 +135,7 @@ impl Clip {
     }
 
     /// Wire form: images travel as PNG, which is far smaller than raw RGBA.
+    /// Files travel as names and sizes; their contents follow the message.
     pub fn to_wire(&self) -> Result<WireClip> {
         Ok(match self {
             Clip::Text(t) => WireClip::Text { text: t.clone() },
@@ -116,7 +152,7 @@ impl Clip {
                     .iter()
                     .map(|f| WireFile {
                         name: f.name.clone(),
-                        data: base64::engine::general_purpose::STANDARD.encode(&f.data),
+                        size: f.size,
                     })
                     .collect(),
             },
@@ -130,25 +166,7 @@ impl Clip {
                 let bytes = base64::engine::general_purpose::STANDARD.decode(png)?;
                 decode_png(&bytes)?
             }
-            WireClip::Files { files } => {
-                if files.is_empty() {
-                    bail!("no files");
-                }
-                let mut out = Vec::with_capacity(files.len());
-                let mut total = 0;
-                for f in files {
-                    if !is_safe_file_name(&f.name) {
-                        bail!("refusing file name {:?}", f.name);
-                    }
-                    let data = base64::engine::general_purpose::STANDARD.decode(f.data)?;
-                    total += data.len();
-                    if total > MAX_FILES_BYTES {
-                        bail!("files are larger than {MAX_FILES_BYTES} bytes");
-                    }
-                    out.push(FileData { name: f.name, data });
-                }
-                Clip::Files(out)
-            }
+            WireClip::Files { .. } => bail!("files are received with their contents"),
         })
     }
 }
@@ -163,6 +181,7 @@ pub enum WireClip {
     Image {
         png: String,
     },
+    /// Names and sizes; the contents follow as raw messages, file by file.
     Files {
         files: Vec<WireFile>,
     },
@@ -171,8 +190,7 @@ pub enum WireClip {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WireFile {
     pub name: String,
-    /// Base64-encoded contents.
-    pub data: String,
+    pub size: u64,
 }
 
 fn encode_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>> {
@@ -235,8 +253,8 @@ pub trait Clipboard: Send {
 #[cfg(feature = "system-clipboard")]
 pub struct SystemClipboard {
     inner: arboard::Clipboard,
-    /// The file list last read and what it gave, so polling doesn't re-read
-    /// unchanged files.
+    /// The file list last read and what it gave, so polling doesn't warn
+    /// again about the same unusable files.
     files_cache: Option<(Vec<FileStamp>, Option<Clip>)>,
 }
 
@@ -282,52 +300,14 @@ impl SystemClipboard {
 
 #[cfg(feature = "system-clipboard")]
 fn load_files(stamps: &[FileStamp]) -> Result<Clip> {
-    let total: u64 = stamps.iter().map(|s| s.1).sum();
-    if total > MAX_FILES_BYTES as u64 {
-        bail!("they are larger than {} MiB", MAX_FILES_BYTES >> 20);
-    }
-    let mut files = Vec::with_capacity(stamps.len());
-    for (path, _, _) in stamps {
-        if !path.is_file() {
-            bail!("{} is not a file (folders are not synced)", path.display());
-        }
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .filter(|n| is_safe_file_name(n))
-            .with_context(|| format!("unusable file name {}", path.display()))?
-            .to_owned();
-        let data = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-        files.push(FileData { name, data });
-    }
-    if files.iter().map(|f| f.data.len()).sum::<usize>() > MAX_FILES_BYTES {
-        bail!("they are larger than {} MiB", MAX_FILES_BYTES >> 20);
+    let files = stamps
+        .iter()
+        .map(|(path, _, _)| FileRef::from_path(path))
+        .collect::<Result<Vec<_>>>()?;
+    if files.iter().map(|f| f.size).sum::<u64>() > MAX_FILES_BYTES {
+        bail!("they are larger than {} GiB", MAX_FILES_BYTES >> 30);
     }
     Ok(Clip::Files(files))
-}
-
-/// Writes received files under the temp directory, one folder per clip, and
-/// returns their paths. File managers copy them from there on paste.
-#[cfg(feature = "system-clipboard")]
-fn write_files(clip: &Clip, files: &[FileData]) -> Result<Vec<std::path::PathBuf>> {
-    let id: String = clip.digest()[..8]
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    let dir = std::env::temp_dir().join("universal-clipboard").join(id);
-    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    files
-        .iter()
-        .map(|f| {
-            if !is_safe_file_name(&f.name) {
-                bail!("refusing file name {:?}", f.name);
-            }
-            let path = dir.join(&f.name);
-            std::fs::write(&path, &f.data)
-                .with_context(|| format!("writing {}", path.display()))?;
-            Ok(path)
-        })
-        .collect()
 }
 
 #[cfg(feature = "system-clipboard")]
@@ -364,7 +344,7 @@ impl Clipboard for SystemClipboard {
                 bytes: std::borrow::Cow::Borrowed(rgba),
             })?,
             Clip::Files(files) => {
-                let paths = write_files(clip, files)?;
+                let paths: Vec<&Path> = files.iter().map(|f| f.path.as_path()).collect();
                 self.inner.set().file_list(&paths)?;
             }
         }
@@ -415,51 +395,52 @@ mod tests {
         assert!(Clip::from_png(b"not a png").is_err());
     }
 
-    fn files(names: &[&str]) -> Clip {
+    /// Writes small files named `names` into a fresh temp folder.
+    fn files(tag: &str, names: &[&str]) -> Clip {
+        let dir = std::env::temp_dir().join(format!("clip-core-test-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // macOS hands back /private/var for /var.
+        let dir = dir.canonicalize().unwrap();
         Clip::Files(
             names
                 .iter()
-                .map(|n| FileData {
-                    name: n.to_string(),
-                    data: n.as_bytes().repeat(3),
+                .map(|n| {
+                    let path = dir.join(n);
+                    std::fs::write(&path, n.repeat(3)).unwrap();
+                    FileRef::from_path(&path).unwrap()
                 })
                 .collect(),
         )
     }
 
     #[test]
-    fn files_survive_wire_round_trip() {
-        let clip = files(&["report.pdf", "photo 1.jpg"]);
-        let back = Clip::from_wire(clip.to_wire().unwrap()).unwrap();
-        assert_eq!(back, clip);
-        assert_ne!(clip.digest(), files(&["report.pdf"]).digest());
+    fn files_travel_as_names_and_sizes() {
+        let clip = files("wire", &["report.pdf", "photo 1.jpg"]);
+        let WireClip::Files { files: wire } = clip.to_wire().unwrap() else {
+            panic!("not files");
+        };
+        assert_eq!(wire[1].name, "photo 1.jpg");
+        assert_eq!(wire[1].size, 33);
+        assert_eq!(clip.len(), 30 + 33);
+        assert_ne!(clip.digest(), files("wire", &["report.pdf"]).digest());
     }
 
     #[test]
     fn unsafe_file_names_are_refused() {
         for bad in ["", ".", "..", "../evil", "a/b", "a\\b", "C:evil", "nul\0"] {
             assert!(!is_safe_file_name(bad), "{bad:?}");
-            let wire = WireClip::Files {
-                files: vec![WireFile {
-                    name: bad.into(),
-                    data: String::new(),
-                }],
-            };
-            assert!(Clip::from_wire(wire).is_err(), "{bad:?}");
+            assert!(
+                FileRef::named(bad, Path::new("Cargo.toml")).is_err(),
+                "{bad:?}"
+            );
         }
         assert!(is_safe_file_name("notes (final).txt"));
     }
 
     #[test]
-    fn oversized_files_are_refused() {
-        let big = base64::engine::general_purpose::STANDARD.encode(vec![0u8; MAX_FILES_BYTES + 1]);
-        let wire = WireClip::Files {
-            files: vec![WireFile {
-                name: "big.bin".into(),
-                data: big,
-            }],
-        };
-        assert!(Clip::from_wire(wire).is_err());
+    fn folders_are_not_files() {
+        assert!(FileRef::from_path(&std::env::temp_dir()).is_err());
+        assert!(FileRef::from_path(Path::new("/no/such/file.txt")).is_err());
     }
 
     /// Needs a desktop session: `cargo test -- --ignored`.
@@ -467,7 +448,7 @@ mod tests {
     #[test]
     #[ignore]
     fn system_clipboard_round_trips_files() {
-        let clip = files(&["a.txt", "b.txt"]);
+        let clip = files("system", &["a.txt", "b.txt"]);
         let mut cb = SystemClipboard::new().unwrap();
         cb.set(&clip).unwrap();
         assert_eq!(cb.get(), Some(clip));
