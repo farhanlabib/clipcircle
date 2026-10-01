@@ -364,3 +364,54 @@ async fn connection_check_reports_each_member() {
     let (name, _) = engine_a.ping(addr_b).await.unwrap();
     assert_eq!(name, "windows");
 }
+
+#[tokio::test]
+async fn received_files_are_not_sent_back_when_devices_share_a_clipboard() {
+    // Two devices on one machine (`--state`) share the clipboard and the
+    // received-files folder. A received copy must not be sent on again, or
+    // the two keep bouncing it, rewriting it on every poll.
+    let mut a = State::generate("one").unwrap();
+    let mut b = State::generate("two").unwrap();
+    pair(&mut a, &mut b, "121212", "121212").await.unwrap();
+
+    let tmp = std::env::temp_dir().join(format!("clip-e2e-echo-{}", std::process::id()));
+    let received = tmp.join("received");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let path = tmp.join("report.pdf");
+    std::fs::write(&path, b"%PDF-1.7 not really").unwrap();
+
+    let shared = MemoryClipboard::default();
+    let mut engines = Vec::new();
+    for state in [&a, &b] {
+        let engine = Engine::new(state.clone(), None, Box::new(shared.clone()))
+            .with_received_dir(received.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let e = engine.clone();
+        tokio::spawn(async move { e.serve(listener).await });
+        engines.push((engine, state.device.id.clone(), addr));
+    }
+    for (engine, _, _) in &engines {
+        for (_, id, addr) in &engines {
+            engine.peers.lock().unwrap().insert(id.clone(), vec![*addr]);
+        }
+        let e = engine.clone();
+        tokio::spawn(async move { e.watch().await });
+    }
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let mut clip = shared.clone();
+    clip.set(&Clip::Files(vec![FileRef::from_path(&path).unwrap()]))
+        .unwrap();
+
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..40 {
+        if let Some(Clip::Files(f)) = clip.get() {
+            seen.insert(f[0].path.clone());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    // The original, plus at most one received copy.
+    assert!(seen.len() <= 2, "file kept bouncing: {seen:?}");
+    std::fs::remove_dir_all(&tmp).unwrap();
+}

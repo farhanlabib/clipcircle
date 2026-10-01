@@ -186,10 +186,32 @@ impl Engine {
             if self.is_paused() {
                 continue;
             }
+            // Files we (or another circle device on this machine) received are
+            // already in the circle. Sending them on would bounce them between
+            // devices that share one clipboard, rewriting them every poll.
+            if self.is_received(&clip) {
+                continue;
+            }
             let me = self.state.lock().await.device.name.clone();
             self.record(&me, &clip);
             self.broadcast(&clip).await;
         }
+    }
+
+    /// Whether `clip` is files that were written to the received-files folder.
+    fn is_received(&self, clip: &Clip) -> bool {
+        let Clip::Files(files) = clip else {
+            return false;
+        };
+        // Resolve symlinks: on macOS the clipboard reports /private/var/...
+        // for a temp dir that is /var/... in $TMPDIR.
+        let Ok(root) = self.received_dir.canonicalize() else {
+            return false;
+        };
+        !files.is_empty()
+            && files
+                .iter()
+                .all(|f| f.path.canonicalize().is_ok_and(|p| p.starts_with(&root)))
     }
 
     /// Sends a clip copied on this device, for platforms where the app hands
