@@ -62,6 +62,10 @@ pub fn browse_circle(circle_id: String, self_id: String, peers: PeerMap) -> Resu
                     }
                     let addrs =
                         dialable_addrs(info.get_addresses().iter().copied(), info.get_port());
+                    // Early resolves can carry only link-local addresses; wait for a usable one.
+                    if addrs.is_empty() {
+                        continue;
+                    }
                     by_fullname.insert(info.get_fullname().to_owned(), device.to_owned());
                     let previous = peers
                         .lock()

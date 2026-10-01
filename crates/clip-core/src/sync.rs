@@ -140,6 +140,13 @@ impl Engine {
         tracing::info!(from, bytes = clip.len(), "received clip");
         let mut last = self.last.lock().await;
         let mut clipboard = self.clipboard.lock().await;
+        let digest = clip.digest();
+        // Already on our clipboard (e.g. both sides copied it at once): writing it
+        // again is redundant and can fail on macOS while another write is in flight.
+        if *last == Some(digest) || clipboard.get().map(|c| c.digest()) == Some(digest) {
+            *last = Some(digest);
+            return Ok(());
+        }
         clipboard.set(&clip)?;
         // Remember what the OS actually stored, which may differ from what we
         // set (e.g. color conversion of images). Otherwise the watcher would
