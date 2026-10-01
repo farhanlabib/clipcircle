@@ -35,6 +35,9 @@ enum Command {
         #[arg(long)]
         addr: Option<SocketAddr>,
     },
+    /// Remove a device from the circle, by name or id. Other members learn
+    /// about it the next time they sync with this device.
+    Remove { device: String },
     /// Sync the clipboard with the circle until stopped.
     Run {
         #[arg(long, default_value_t = 47800)]
@@ -89,6 +92,11 @@ async fn main() -> Result<()> {
             pairing::join(stream, &code, &mut state).await?;
             state.save(&path)?;
             println!("Joined the circle with {} other device(s).", state.members.len());
+        }
+        Command::Remove { device } => {
+            let removed = state.remove_member(&device)?;
+            state.save(&path)?;
+            println!("Removed {} ({}) from the circle.", removed.name, removed.id);
         }
         Command::Run { port } => {
             let listener = TcpListener::bind(("0.0.0.0", port)).await?;

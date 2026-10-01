@@ -43,6 +43,8 @@ pub async fn host(listener: &TcpListener, code: &str, state: &mut State) -> Resu
             let Message::Join { device } = chan.recv_json().await? else {
                 bail!("expected join message");
             };
+            // Pairing again is how a removed device is let back in.
+            state.removed.retain(|k| *k != device.public_key);
             state.merge_members(std::slice::from_ref(&device));
             chan.send_json(&Message::Welcome {
                 circle_id: state.circle_id.clone(),

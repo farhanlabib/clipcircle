@@ -10,11 +10,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use sha2::{Digest, Sha256};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
-use crate::clipboard::Clipboard;
+use crate::clipboard::{Clip, Clipboard, WireClip};
 use crate::discovery::PeerMap;
 use crate::protocol::Message;
 use crate::transport::{self, SecureStream};
@@ -28,13 +27,9 @@ pub struct Engine {
     state: Arc<Mutex<State>>,
     state_path: Option<PathBuf>,
     clipboard: Arc<Mutex<Box<dyn Clipboard>>>,
-    /// Hash of the last text we sent or received, so we don't echo it back.
+    /// Hash of the last clip we sent or received, so we don't echo it back.
     last: Arc<Mutex<Option<[u8; 32]>>>,
     pub peers: PeerMap,
-}
-
-fn digest(text: &str) -> [u8; 32] {
-    Sha256::digest(text.as_bytes()).into()
 }
 
 impl Engine {
@@ -61,17 +56,17 @@ impl Engine {
         }
     }
 
-    /// Polls the local clipboard and pushes every new text to the circle.
+    /// Polls the local clipboard and pushes every new clip to the circle.
     pub async fn watch(&self) -> Result<()> {
         // Don't broadcast whatever was already on the clipboard at startup.
-        if let Some(text) = self.clipboard.lock().await.get_text() {
-            *self.last.lock().await = Some(digest(&text));
+        if let Some(clip) = self.clipboard.lock().await.get() {
+            *self.last.lock().await = Some(clip.digest());
         }
         let mut tick = tokio::time::interval(POLL_INTERVAL);
         loop {
             tick.tick().await;
-            let Some(text) = self.clipboard.lock().await.get_text() else { continue };
-            let hash = digest(&text);
+            let Some(clip) = self.clipboard.lock().await.get() else { continue };
+            let hash = clip.digest();
             {
                 let mut last = self.last.lock().await;
                 if *last == Some(hash) {
@@ -79,19 +74,26 @@ impl Engine {
                 }
                 *last = Some(hash);
             }
-            self.broadcast(&text).await;
+            self.broadcast(&clip).await;
         }
     }
 
-    pub async fn broadcast(&self, text: &str) {
+    pub async fn broadcast(&self, clip: &Clip) {
+        // Encode once (PNG for images) and share it with every push.
+        let clip = clip.clone();
+        let wire = match tokio::task::spawn_blocking(move || clip.to_wire()).await {
+            Ok(Ok(wire)) => Arc::new(wire),
+            Ok(Err(e)) => return tracing::warn!("could not encode clip: {e:#}"),
+            Err(e) => return tracing::warn!("clip encoder crashed: {e}"),
+        };
         let targets: Vec<(String, Vec<SocketAddr>)> =
             self.peers.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         for (device, addrs) in targets {
             let engine = self.clone();
-            let text = text.to_owned();
+            let wire = wire.clone();
             tokio::spawn(async move {
                 for addr in addrs {
-                    match engine.push(addr, &text).await {
+                    match engine.push_wire(addr, &wire).await {
                         Ok(()) => return tracing::debug!(device, %addr, "pushed clip"),
                         Err(e) => tracing::debug!(device, %addr, "push failed: {e:#}"),
                     }
@@ -101,8 +103,12 @@ impl Engine {
         }
     }
 
-    /// Sends `text` to the device at `addr`.
-    pub async fn push(&self, addr: SocketAddr, text: &str) -> Result<()> {
+    /// Sends `clip` to the device at `addr`.
+    pub async fn push(&self, addr: SocketAddr, clip: &Clip) -> Result<()> {
+        self.push_wire(addr, &clip.to_wire()?).await
+    }
+
+    async fn push_wire(&self, addr: SocketAddr, wire: &WireClip) -> Result<()> {
         let stream = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr))
             .await
             .context("connect timed out")??;
@@ -111,7 +117,7 @@ impl Engine {
         self.check_member(&chan).await?;
         self.send_hello(&mut chan).await?;
         self.recv_hello(&mut chan).await?;
-        chan.send_json(&Message::Clip { text: text.to_owned() }).await
+        chan.send_json(&Message::Clip { clip: wire.clone() }).await
     }
 
     async fn handle_incoming(&self, stream: TcpStream) -> Result<()> {
@@ -120,12 +126,18 @@ impl Engine {
         let from = self.check_member(&chan).await?;
         self.recv_hello(&mut chan).await?;
         self.send_hello(&mut chan).await?;
-        let Message::Clip { text } = chan.recv_json().await? else {
+        let Message::Clip { clip } = chan.recv_json().await? else {
             bail!("expected clip message");
         };
-        tracing::info!(from, bytes = text.len(), "received clip");
-        *self.last.lock().await = Some(digest(&text));
-        self.clipboard.lock().await.set_text(&text)?;
+        let clip = tokio::task::spawn_blocking(move || Clip::from_wire(clip)).await??;
+        tracing::info!(from, bytes = clip.len(), "received clip");
+        let mut last = self.last.lock().await;
+        let mut clipboard = self.clipboard.lock().await;
+        clipboard.set(&clip)?;
+        // Remember what the OS actually stored, which may differ from what we
+        // set (e.g. color conversion of images). Otherwise the watcher would
+        // see a "new" clip and send it back, and the two could bounce forever.
+        *last = Some(clipboard.get().unwrap_or(clip).digest());
         Ok(())
     }
 
@@ -142,7 +154,11 @@ impl Engine {
     async fn send_hello(&self, chan: &mut SecureStream) -> Result<()> {
         let msg = {
             let state = self.state.lock().await;
-            Message::Hello { circle_id: state.circle_id.clone(), members: state.all_members() }
+            Message::Hello {
+                circle_id: state.circle_id.clone(),
+                members: state.all_members(),
+                removed: state.removed.clone(),
+            }
         };
         chan.send_json(&msg).await
     }
@@ -150,15 +166,18 @@ impl Engine {
     /// Learns about members the peer knows and we don't (e.g. a third device
     /// that paired with the peer while we were offline).
     async fn recv_hello(&self, chan: &mut SecureStream) -> Result<()> {
-        let Message::Hello { circle_id, members } = chan.recv_json().await? else {
+        let Message::Hello { circle_id, members, removed } = chan.recv_json().await? else {
             bail!("expected hello message");
         };
         let mut state = self.state.lock().await;
         if circle_id != state.circle_id {
             bail!("peer is in a different circle");
         }
-        if state.merge_members(&members) {
-            tracing::info!("learned new circle members");
+        // Removals first, so a member removed elsewhere isn't re-added.
+        let removed_any = state.merge_removed(&removed);
+        let added_any = state.merge_members(&members);
+        if removed_any || added_any {
+            tracing::info!(removed_any, added_any, "circle membership updated");
             if let Some(path) = &self.state_path {
                 state.save(path)?;
             }

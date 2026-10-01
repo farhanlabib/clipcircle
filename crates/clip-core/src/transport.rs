@@ -18,7 +18,7 @@ const NOISE_MAX: usize = 65535;
 const TAG_LEN: usize = 16;
 const CHUNK: usize = NOISE_MAX - TAG_LEN;
 /// Largest application message we accept (clipboard text included).
-pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
+pub const MAX_MESSAGE: usize = 48 * 1024 * 1024;
 
 pub fn generate_keypair() -> Result<snow::Keypair> {
     Ok(snow::Builder::new(SYNC_PARAMS.parse()?).generate_keypair()?)

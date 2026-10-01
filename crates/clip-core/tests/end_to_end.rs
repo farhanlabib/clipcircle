@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use clip_core::clipboard::{Clipboard, MemoryClipboard};
+use clip_core::clipboard::{Clip, Clipboard, MemoryClipboard};
 use clip_core::sync::Engine;
 use clip_core::{pairing, State};
 use tokio::net::{TcpListener, TcpStream};
@@ -66,16 +66,16 @@ async fn copy_on_one_device_pastes_on_the_other() {
     tokio::spawn(async move { watch_a.watch().await });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    clip_a.set_text("hello from the mac").unwrap();
+    clip_a.set(&Clip::Text("hello from the mac".into())).unwrap();
 
     let mut clip_b_read = clip_b.clone();
     for _ in 0..40 {
-        if clip_b_read.get_text().as_deref() == Some("hello from the mac") {
+        if clip_b_read.get() == Some(Clip::Text("hello from the mac".into())) {
             return;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    panic!("clip never arrived, b has {:?}", clip_b_read.get_text());
+    panic!("clip never arrived, b has {:?}", clip_b_read.get());
 }
 
 #[tokio::test]
@@ -93,7 +93,69 @@ async fn device_outside_circle_is_rejected() {
     tokio::spawn(async move { serve_b.serve(listener).await });
 
     let engine_s = Engine::new(stranger, None, Box::new(MemoryClipboard::default()));
-    assert!(engine_s.push(addr, "sneaky").await.is_err());
+    assert!(engine_s.push(addr, &Clip::Text("sneaky".into())).await.is_err());
     let mut clip_b = clip_b;
-    assert_eq!(clip_b.get_text(), None);
+    assert_eq!(clip_b.get(), None);
+}
+
+/// Starts an engine listening on localhost; returns it with its address.
+async fn serve(state: State, clip: MemoryClipboard) -> (Engine, std::net::SocketAddr) {
+    let engine = Engine::new(state, None, Box::new(clip));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let e = engine.clone();
+    tokio::spawn(async move { e.serve(listener).await });
+    (engine, addr)
+}
+
+#[tokio::test]
+async fn image_reaches_the_other_device() {
+    let mut a = State::generate("mac").unwrap();
+    let mut b = State::generate("windows").unwrap();
+    pair(&mut a, &mut b, "222222", "222222").await.unwrap();
+
+    let clip_b = MemoryClipboard::default();
+    let (_engine_b, addr_b) = serve(b, clip_b.clone()).await;
+    let engine_a = Engine::new(a, None, Box::new(MemoryClipboard::default()));
+
+    let (width, height) = (64, 48);
+    let rgba: Vec<u8> = (0..width * height * 4).map(|i| (i % 251) as u8).collect();
+    let image = Clip::Image { width, height, rgba };
+    engine_a.push(addr_b, &image).await.unwrap();
+
+    // push returns once sent; b applies it a moment later.
+    let mut clip_b = clip_b;
+    for _ in 0..40 {
+        if clip_b.get().as_ref() == Some(&image) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("image never arrived");
+}
+
+#[tokio::test]
+async fn removed_device_is_rejected_and_removal_spreads() {
+    // a hosts the circle; b and c both join it.
+    let mut a = State::generate("mac").unwrap();
+    let mut b = State::generate("windows").unwrap();
+    let mut c = State::generate("old-laptop").unwrap();
+    pair(&mut a, &mut b, "333333", "333333").await.unwrap();
+    pair(&mut a, &mut c, "444444", "444444").await.unwrap();
+    // b learns about c the way it would in practice: via gossip from a.
+    b.merge_members(&a.all_members());
+
+    // a removes c, then syncs with b.
+    a.remove_member("old-laptop").unwrap();
+    let (engine_b, addr_b) = serve(b.clone(), MemoryClipboard::default()).await;
+    let engine_a = Engine::new(a, None, Box::new(MemoryClipboard::default()));
+    engine_a.push(addr_b, &Clip::Text("hi".into())).await.unwrap();
+
+    let b_now = engine_b.state().await;
+    assert!(b_now.members.iter().all(|m| m.name != "old-laptop"));
+    assert!(b_now.members.iter().any(|m| m.name == "mac"));
+
+    // c can no longer push to b.
+    let engine_c = Engine::new(c, None, Box::new(MemoryClipboard::default()));
+    assert!(engine_c.push(addr_b, &Clip::Text("let me in".into())).await.is_err());
 }

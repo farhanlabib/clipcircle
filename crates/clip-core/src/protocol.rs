@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::clipboard::WireClip;
 use crate::Member;
 
 /// Messages exchanged inside an encrypted channel.
@@ -11,7 +12,13 @@ pub enum Message {
     /// Pairing: the host admits the joiner into its circle.
     Welcome { circle_id: String, members: Vec<Member> },
     /// Sync: first message each way, used to gossip circle membership.
-    Hello { circle_id: String, members: Vec<Member> },
+    Hello {
+        circle_id: String,
+        members: Vec<Member>,
+        /// Public keys of devices removed from the circle.
+        #[serde(default)]
+        removed: Vec<String>,
+    },
     /// Sync: new clipboard contents.
-    Clip { text: String },
+    Clip { clip: WireClip },
 }

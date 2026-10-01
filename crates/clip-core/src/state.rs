@@ -25,6 +25,10 @@ pub struct State {
     pub circle_id: String,
     /// Other devices in the circle (never includes `device`).
     pub members: Vec<Member>,
+    /// Public keys of devices removed from the circle. Kept so that gossip
+    /// from a member that hasn't heard about the removal can't re-add them.
+    #[serde(default)]
+    pub removed: Vec<String>,
 }
 
 fn random_hex(bytes: usize) -> String {
@@ -46,6 +50,7 @@ impl State {
             private_key: hex::encode(&keypair.private),
             circle_id: random_hex(16),
             members: Vec::new(),
+            removed: Vec::new(),
         })
     }
 
@@ -90,13 +95,43 @@ impl State {
     pub fn merge_members(&mut self, others: &[Member]) -> bool {
         let mut changed = false;
         for m in others {
-            if m.public_key == self.device.public_key {
+            if m.public_key == self.device.public_key || self.removed.contains(&m.public_key) {
                 continue;
             }
             if !self.members.iter().any(|known| known.public_key == m.public_key) {
                 self.members.push(m.clone());
                 changed = true;
             }
+        }
+        changed
+    }
+
+    /// Removes the member whose id or name is `who`. Errors if none or several match.
+    pub fn remove_member(&mut self, who: &str) -> Result<Member> {
+        let matches: Vec<usize> = (0..self.members.len())
+            .filter(|&i| self.members[i].id == who || self.members[i].name == who)
+            .collect();
+        match matches.as_slice() {
+            [] => anyhow::bail!("no device called {who:?} in this circle"),
+            [i] => {
+                let m = self.members.remove(*i);
+                self.removed.push(m.public_key.clone());
+                Ok(m)
+            }
+            _ => anyhow::bail!("several devices are called {who:?}; use the device id instead"),
+        }
+    }
+
+    /// Applies removals another member knows about. Returns true if anything changed.
+    pub fn merge_removed(&mut self, keys: &[String]) -> bool {
+        let mut changed = false;
+        for key in keys {
+            if *key == self.device.public_key || self.removed.contains(key) {
+                continue;
+            }
+            self.removed.push(key.clone());
+            self.members.retain(|m| m.public_key != *key);
+            changed = true;
         }
         changed
     }
