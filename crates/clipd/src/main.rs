@@ -13,7 +13,10 @@ use clip_core::{pairing, State};
 use tokio::net::{TcpListener, TcpStream};
 
 #[derive(Parser)]
-#[command(version, about = "Share your clipboard with the devices in your circle")]
+#[command(
+    version,
+    about = "Share your clipboard with the devices in your circle"
+)]
 struct Cli {
     /// Where this device's identity and circle are stored.
     #[arg(long, global = true)]
@@ -91,7 +94,10 @@ async fn main() -> Result<()> {
             let stream = TcpStream::connect(addr).await?;
             pairing::join(stream, &code, &mut state).await?;
             state.save(&path)?;
-            println!("Joined the circle with {} other device(s).", state.members.len());
+            println!(
+                "Joined the circle with {} other device(s).",
+                state.members.len()
+            );
         }
         Command::Remove { device } => {
             let removed = state.remove_member(&device)?;
@@ -107,9 +113,15 @@ async fn main() -> Result<()> {
                 &[("circle", &state.circle_id), ("device", &state.device.id)],
             )?;
             let engine = Engine::new(state.clone(), Some(path), Box::new(SystemClipboard::new()?));
-            let _browser =
-                discovery::browse_circle(state.circle_id.clone(), state.device.id.clone(), engine.peers.clone())?;
-            println!("Syncing clipboard as {} on port {port}. Ctrl+C to stop.", state.device.name);
+            let _browser = discovery::browse_circle(
+                state.circle_id.clone(),
+                state.device.id.clone(),
+                engine.peers.clone(),
+            )?;
+            println!(
+                "Syncing clipboard as {} on port {port}. Ctrl+C to stop.",
+                state.device.name
+            );
             tokio::select! {
                 r = engine.serve(listener) => r?,
                 r = engine.watch() => r?,

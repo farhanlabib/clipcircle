@@ -10,7 +10,10 @@ pub enum Message {
     /// Pairing: the joining device introduces itself.
     Join { device: Member },
     /// Pairing: the host admits the joiner into its circle.
-    Welcome { circle_id: String, members: Vec<Member> },
+    Welcome {
+        circle_id: String,
+        members: Vec<Member>,
+    },
     /// Sync: first message each way, used to gossip circle membership.
     Hello {
         circle_id: String,

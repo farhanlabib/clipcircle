@@ -65,7 +65,9 @@ impl Engine {
         let mut tick = tokio::time::interval(POLL_INTERVAL);
         loop {
             tick.tick().await;
-            let Some(clip) = self.clipboard.lock().await.get() else { continue };
+            let Some(clip) = self.clipboard.lock().await.get() else {
+                continue;
+            };
             let hash = clip.digest();
             {
                 let mut last = self.last.lock().await;
@@ -86,8 +88,13 @@ impl Engine {
             Ok(Err(e)) => return tracing::warn!("could not encode clip: {e:#}"),
             Err(e) => return tracing::warn!("clip encoder crashed: {e}"),
         };
-        let targets: Vec<(String, Vec<SocketAddr>)> =
-            self.peers.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let targets: Vec<(String, Vec<SocketAddr>)> = self
+            .peers
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         for (device, addrs) in targets {
             let engine = self.clone();
             let wire = wire.clone();
@@ -166,7 +173,12 @@ impl Engine {
     /// Learns about members the peer knows and we don't (e.g. a third device
     /// that paired with the peer while we were offline).
     async fn recv_hello(&self, chan: &mut SecureStream) -> Result<()> {
-        let Message::Hello { circle_id, members, removed } = chan.recv_json().await? else {
+        let Message::Hello {
+            circle_id,
+            members,
+            removed,
+        } = chan.recv_json().await?
+        else {
             bail!("expected hello message");
         };
         let mut state = self.state.lock().await;

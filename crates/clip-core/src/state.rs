@@ -64,7 +64,8 @@ impl State {
         if path.exists() {
             let raw = std::fs::read_to_string(path)
                 .with_context(|| format!("reading {}", path.display()))?;
-            return serde_json::from_str(&raw).with_context(|| format!("parsing {}", path.display()));
+            return serde_json::from_str(&raw)
+                .with_context(|| format!("parsing {}", path.display()));
         }
         let name = gethostname::gethostname().to_string_lossy().into_owned();
         let state = Self::generate(name)?;
@@ -98,7 +99,11 @@ impl State {
             if m.public_key == self.device.public_key || self.removed.contains(&m.public_key) {
                 continue;
             }
-            if !self.members.iter().any(|known| known.public_key == m.public_key) {
+            if !self
+                .members
+                .iter()
+                .any(|known| known.public_key == m.public_key)
+            {
                 self.members.push(m.clone());
                 changed = true;
             }
@@ -138,6 +143,8 @@ impl State {
 
     /// This device plus every known member, as shared with peers.
     pub fn all_members(&self) -> Vec<Member> {
-        std::iter::once(self.device.clone()).chain(self.members.iter().cloned()).collect()
+        std::iter::once(self.device.clone())
+            .chain(self.members.iter().cloned())
+            .collect()
     }
 }

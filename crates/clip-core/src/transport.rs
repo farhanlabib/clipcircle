@@ -48,11 +48,16 @@ async fn handshake(mut stream: TcpStream, mut hs: snow::HandshakeState) -> Resul
             write_frame(&mut stream, &buf[..n]).await?;
         } else {
             let msg = read_frame(&mut stream).await?;
-            hs.read_message(&msg, &mut buf).context("noise handshake failed")?;
+            hs.read_message(&msg, &mut buf)
+                .context("noise handshake failed")?;
         }
     }
     let remote_static = hs.get_remote_static().map(<[u8]>::to_vec);
-    Ok(SecureStream { stream, noise: hs.into_transport_mode()?, remote_static })
+    Ok(SecureStream {
+        stream,
+        noise: hs.into_transport_mode()?,
+        remote_static,
+    })
 }
 
 pub async fn sync_initiator(stream: TcpStream, private_key: &[u8]) -> Result<SecureStream> {
@@ -70,12 +75,16 @@ pub async fn sync_responder(stream: TcpStream, private_key: &[u8]) -> Result<Sec
 }
 
 pub async fn pair_initiator(stream: TcpStream, psk: &[u8; 32]) -> Result<SecureStream> {
-    let hs = snow::Builder::new(PAIR_PARAMS.parse()?).psk(0, psk)?.build_initiator()?;
+    let hs = snow::Builder::new(PAIR_PARAMS.parse()?)
+        .psk(0, psk)?
+        .build_initiator()?;
     handshake(stream, hs).await
 }
 
 pub async fn pair_responder(stream: TcpStream, psk: &[u8; 32]) -> Result<SecureStream> {
-    let hs = snow::Builder::new(PAIR_PARAMS.parse()?).psk(0, psk)?.build_responder()?;
+    let hs = snow::Builder::new(PAIR_PARAMS.parse()?)
+        .psk(0, psk)?
+        .build_responder()?;
     handshake(stream, hs).await
 }
 
@@ -113,7 +122,10 @@ impl SecureStream {
         let mut expected = None;
         loop {
             let frame = read_frame(&mut self.stream).await?;
-            let n = self.noise.read_message(&frame, &mut buf).context("decrypt failed")?;
+            let n = self
+                .noise
+                .read_message(&frame, &mut buf)
+                .context("decrypt failed")?;
             plain.extend_from_slice(&buf[..n]);
             if expected.is_none() && plain.len() >= 4 {
                 let len = u32::from_be_bytes(plain[..4].try_into().unwrap()) as usize;

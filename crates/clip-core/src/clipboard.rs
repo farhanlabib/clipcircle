@@ -11,7 +11,11 @@ use sha2::{Digest, Sha256};
 pub enum Clip {
     Text(String),
     /// Raw RGBA pixels, 4 bytes per pixel, row by row.
-    Image { width: usize, height: usize, rgba: Vec<u8> },
+    Image {
+        width: usize,
+        height: usize,
+        rgba: Vec<u8>,
+    },
 }
 
 impl Clip {
@@ -22,7 +26,11 @@ impl Clip {
                 h.update(b"text\0");
                 h.update(t.as_bytes());
             }
-            Clip::Image { width, height, rgba } => {
+            Clip::Image {
+                width,
+                height,
+                rgba,
+            } => {
                 h.update(b"image\0");
                 h.update((*width as u64).to_be_bytes());
                 h.update((*height as u64).to_be_bytes());
@@ -47,8 +55,13 @@ impl Clip {
     pub fn to_wire(&self) -> Result<WireClip> {
         Ok(match self {
             Clip::Text(t) => WireClip::Text { text: t.clone() },
-            Clip::Image { width, height, rgba } => WireClip::Image {
-                png: base64::engine::general_purpose::STANDARD.encode(encode_png(*width, *height, rgba)?),
+            Clip::Image {
+                width,
+                height,
+                rgba,
+            } => WireClip::Image {
+                png: base64::engine::general_purpose::STANDARD
+                    .encode(encode_png(*width, *height, rgba)?),
             },
         })
     }
@@ -67,9 +80,13 @@ impl Clip {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WireClip {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     /// Base64-encoded PNG.
-    Image { png: String },
+    Image {
+        png: String,
+    },
 }
 
 fn encode_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>> {
@@ -104,12 +121,22 @@ fn decode_png(bytes: &[u8]) -> Result<Clip> {
     buf.truncate(frame.buffer_size());
     let rgba = match frame.color_type {
         png::ColorType::Rgba => buf,
-        png::ColorType::Rgb => buf.chunks(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
-        png::ColorType::GrayscaleAlpha => buf.chunks(2).flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
+        png::ColorType::Rgb => buf
+            .chunks(3)
+            .flat_map(|p| [p[0], p[1], p[2], 255])
+            .collect(),
+        png::ColorType::GrayscaleAlpha => buf
+            .chunks(2)
+            .flat_map(|p| [p[0], p[0], p[0], p[1]])
+            .collect(),
         png::ColorType::Grayscale => buf.iter().flat_map(|&g| [g, g, g, 255]).collect(),
         other => bail!("unsupported PNG color type {other:?}"),
     };
-    Ok(Clip::Image { width, height, rgba })
+    Ok(Clip::Image {
+        width,
+        height,
+        rgba,
+    })
 }
 
 /// The OS clipboard, abstracted so the engine can be tested without one.
@@ -133,13 +160,21 @@ impl Clipboard for SystemClipboard {
             return Some(Clip::Text(text));
         }
         let img = self.0.get_image().ok()?;
-        Some(Clip::Image { width: img.width, height: img.height, rgba: img.bytes.into_owned() })
+        Some(Clip::Image {
+            width: img.width,
+            height: img.height,
+            rgba: img.bytes.into_owned(),
+        })
     }
 
     fn set(&mut self, clip: &Clip) -> Result<()> {
         match clip {
             Clip::Text(t) => self.0.set_text(t)?,
-            Clip::Image { width, height, rgba } => self.0.set_image(arboard::ImageData {
+            Clip::Image {
+                width,
+                height,
+                rgba,
+            } => self.0.set_image(arboard::ImageData {
                 width: *width,
                 height: *height,
                 bytes: Cow::Borrowed(rgba),
@@ -171,14 +206,22 @@ mod tests {
     #[test]
     fn image_survives_png_round_trip() {
         let rgba: Vec<u8> = (0..3 * 2 * 4).map(|i| i as u8 * 7).collect();
-        let clip = Clip::Image { width: 3, height: 2, rgba };
+        let clip = Clip::Image {
+            width: 3,
+            height: 2,
+            rgba,
+        };
         let back = Clip::from_wire(clip.to_wire().unwrap()).unwrap();
         assert_eq!(back, clip);
     }
 
     #[test]
     fn mismatched_image_size_is_rejected() {
-        let clip = Clip::Image { width: 10, height: 10, rgba: vec![0; 4] };
+        let clip = Clip::Image {
+            width: 10,
+            height: 10,
+            rgba: vec![0; 4],
+        };
         assert!(clip.to_wire().is_err());
     }
 }

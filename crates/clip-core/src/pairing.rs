@@ -29,8 +29,11 @@ async fn spake(stream: &mut TcpStream, code: &str) -> Result<[u8; 32]> {
     );
     write_frame(stream, &outbound).await?;
     let inbound = read_frame(stream).await?;
-    let key = spake.finish(&inbound).map_err(|e| anyhow!("pairing exchange failed: {e:?}"))?;
-    key.try_into().map_err(|_| anyhow!("unexpected pairing key length"))
+    let key = spake
+        .finish(&inbound)
+        .map_err(|e| anyhow!("pairing exchange failed: {e:?}"))?;
+    key.try_into()
+        .map_err(|_| anyhow!("unexpected pairing key length"))
 }
 
 /// Waits for one device to join with `code` and admits it into `state`'s circle.
@@ -68,8 +71,12 @@ pub async fn join(mut stream: TcpStream, code: &str, state: &mut State) -> Resul
     let mut chan = transport::pair_initiator(stream, &key)
         .await
         .context("wrong code?")?;
-    chan.send_json(&Message::Join { device: state.device.clone() }).await?;
-    let Message::Welcome { circle_id, members } = chan.recv_json().await.context("wrong code?")? else {
+    chan.send_json(&Message::Join {
+        device: state.device.clone(),
+    })
+    .await?;
+    let Message::Welcome { circle_id, members } = chan.recv_json().await.context("wrong code?")?
+    else {
         bail!("expected welcome message");
     };
     state.circle_id = circle_id;

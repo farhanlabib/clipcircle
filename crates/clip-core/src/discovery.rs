@@ -54,13 +54,19 @@ pub fn browse_circle(circle_id: String, self_id: String, peers: PeerMap) -> Resu
             match event {
                 ServiceEvent::ServiceResolved(info) => {
                     let circle = info.get_property_val_str("circle");
-                    let Some(device) = info.get_property_val_str("device") else { continue };
+                    let Some(device) = info.get_property_val_str("device") else {
+                        continue;
+                    };
                     if circle != Some(circle_id.as_str()) || device == self_id {
                         continue;
                     }
-                    let addrs = dialable_addrs(info.get_addresses().iter().copied(), info.get_port());
+                    let addrs =
+                        dialable_addrs(info.get_addresses().iter().copied(), info.get_port());
                     by_fullname.insert(info.get_fullname().to_owned(), device.to_owned());
-                    let previous = peers.lock().unwrap().insert(device.to_owned(), addrs.clone());
+                    let previous = peers
+                        .lock()
+                        .unwrap()
+                        .insert(device.to_owned(), addrs.clone());
                     // mDNS re-resolves once per address; only log real changes.
                     if previous.as_ref() != Some(&addrs) {
                         tracing::info!(device, ?addrs, "found circle device");

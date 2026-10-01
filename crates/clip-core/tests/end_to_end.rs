@@ -5,7 +5,12 @@ use clip_core::sync::Engine;
 use clip_core::{pairing, State};
 use tokio::net::{TcpListener, TcpStream};
 
-async fn pair(host: &mut State, joiner: &mut State, host_code: &str, typed: &str) -> anyhow::Result<()> {
+async fn pair(
+    host: &mut State,
+    joiner: &mut State,
+    host_code: &str,
+    typed: &str,
+) -> anyhow::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
     let code = host_code.to_owned();
@@ -61,12 +66,18 @@ async fn copy_on_one_device_pastes_on_the_other() {
     let addr_b = listener_b.local_addr().unwrap();
     let serve_b = engine_b.clone();
     tokio::spawn(async move { serve_b.serve(listener_b).await });
-    engine_a.peers.lock().unwrap().insert(b.device.id.clone(), vec![addr_b]);
+    engine_a
+        .peers
+        .lock()
+        .unwrap()
+        .insert(b.device.id.clone(), vec![addr_b]);
     let watch_a = engine_a.clone();
     tokio::spawn(async move { watch_a.watch().await });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    clip_a.set(&Clip::Text("hello from the mac".into())).unwrap();
+    clip_a
+        .set(&Clip::Text("hello from the mac".into()))
+        .unwrap();
 
     let mut clip_b_read = clip_b.clone();
     for _ in 0..40 {
@@ -93,7 +104,10 @@ async fn device_outside_circle_is_rejected() {
     tokio::spawn(async move { serve_b.serve(listener).await });
 
     let engine_s = Engine::new(stranger, None, Box::new(MemoryClipboard::default()));
-    assert!(engine_s.push(addr, &Clip::Text("sneaky".into())).await.is_err());
+    assert!(engine_s
+        .push(addr, &Clip::Text("sneaky".into()))
+        .await
+        .is_err());
     let mut clip_b = clip_b;
     assert_eq!(clip_b.get(), None);
 }
@@ -120,7 +134,11 @@ async fn image_reaches_the_other_device() {
 
     let (width, height) = (64, 48);
     let rgba: Vec<u8> = (0..width * height * 4).map(|i| (i % 251) as u8).collect();
-    let image = Clip::Image { width, height, rgba };
+    let image = Clip::Image {
+        width,
+        height,
+        rgba,
+    };
     engine_a.push(addr_b, &image).await.unwrap();
 
     // push returns once sent; b applies it a moment later.
@@ -149,7 +167,10 @@ async fn removed_device_is_rejected_and_removal_spreads() {
     a.remove_member("old-laptop").unwrap();
     let (engine_b, addr_b) = serve(b.clone(), MemoryClipboard::default()).await;
     let engine_a = Engine::new(a, None, Box::new(MemoryClipboard::default()));
-    engine_a.push(addr_b, &Clip::Text("hi".into())).await.unwrap();
+    engine_a
+        .push(addr_b, &Clip::Text("hi".into()))
+        .await
+        .unwrap();
 
     let b_now = engine_b.state().await;
     assert!(b_now.members.iter().all(|m| m.name != "old-laptop"));
@@ -157,5 +178,8 @@ async fn removed_device_is_rejected_and_removal_spreads() {
 
     // c can no longer push to b.
     let engine_c = Engine::new(c, None, Box::new(MemoryClipboard::default()));
-    assert!(engine_c.push(addr_b, &Clip::Text("let me in".into())).await.is_err());
+    assert!(engine_c
+        .push(addr_b, &Clip::Text("let me in".into()))
+        .await
+        .is_err());
 }
