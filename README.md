@@ -4,11 +4,12 @@ Copy on one device, paste on another. Add your devices to a **circle**; any
 circle devices on the same network share their clipboard, end-to-end encrypted,
 with no server or account.
 
-## Status: milestone 2
+## Status
 
-Text and image sync between desktop devices (macOS, Windows, Linux) via the
-`clipd` CLI, and removing a device from a circle. Files, history, a tray app
-(Tauri) and Android come next. iOS will need
+Text, image and file sync between desktop devices (macOS, Windows, Linux),
+with the `clipd` CLI or the tray app, plus an Android app (text and images).
+Devices can be removed from a circle, and recent clips are kept in a local
+history. iOS will need
 the app to be opened (or a Share/Shortcut action) to send, because iOS does not
 let apps read the clipboard in the background.
 
@@ -24,7 +25,10 @@ clipd join 123456
 clipd run
 ```
 
-Copy text or an image on one device and paste it on the other. `clipd devices`
+Copy text, an image or files on one device and paste on the other. Files
+(not folders) copied in Finder, Explorer or a Linux file manager are sent
+when they total 32 MiB or less; on the other device they are saved under the
+temp folder and pasting in the file manager copies them where you want. `clipd devices`
 lists the circle; `clipd remove <name or id>` takes a device out of it.
 `clipd history` lists the last clips copied or received while `clipd run` was
 running (`--copy N` puts one back, `--clear` deletes it, `run --no-history`
@@ -67,7 +71,7 @@ the steps are the `android` job in `.github/workflows/ci.yml`.
 | Pairing | 6-digit code → SPAKE2 → Noise `NNpsk0`. Wrong codes fail; an attacker gets one guess per attempt. The host shares the circle's member list with the joiner. |
 | Discovery | mDNS: `_clipcircle._tcp` (sync, tagged with the circle id) and `_clipcircle-pair._tcp` (while showing a code). |
 | Transport | TCP + Noise `XX`. Each side must prove a key that is in its circle, otherwise the connection is dropped. |
-| Sync | Poll the clipboard every 500 ms; on change, push to every reachable member. Images travel as PNG. Members gossip the member list so a new device spreads through the circle. |
+| Sync | Poll the clipboard every 500 ms; on change, push to every reachable member. Images travel as PNG, files as their bytes with a bare file name (names that could escape a folder are refused). Members gossip the member list so a new device spreads through the circle. |
 | Removal | The removed device's key is kept as a tombstone and gossiped with the member list, so other members drop it too and can't re-add it. Pairing the device again lets it back in. |
 
 Code layout:
@@ -83,4 +87,5 @@ Code layout:
 
 - A removal only spreads when a member that knows about it syncs with the others, and a removed device that pairs again through a member that hasn't heard yet can be removed again by gossip.
 - Images are read from the clipboard on every poll, which costs more than text for big images.
-- One connection per push; fine for text, to be revisited for files.
+- One connection per push, and files travel in one message, so file sync is capped at 32 MiB.
+- Android doesn't send or receive files yet.

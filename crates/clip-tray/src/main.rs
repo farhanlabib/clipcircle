@@ -149,6 +149,8 @@ async fn history(app: tauri::State<'_, App>) -> CmdResult<Vec<HistoryView>> {
             let preview = match &e.content {
                 Content::Text { text, .. } => text.chars().take(200).collect(),
                 Content::Image { width, height } => format!("Image {width}×{height}"),
+                Content::Files { names } if names.len() == 1 => format!("File: {}", names[0]),
+                Content::Files { names } => format!("{} files: {}", names.len(), names.join(", ")),
             };
             HistoryView {
                 from: e.from,

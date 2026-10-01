@@ -191,6 +191,7 @@ fn print_history(history: &History, limit: usize) {
                 p
             }
             Content::Image { width, height } => format!("[image {width}x{height}]"),
+            Content::Files { names } => format!("[files: {}]", names.join(", ")),
         };
         println!(
             "{:>3}  {:>8}  {:<16}  {}",

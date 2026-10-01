@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use clip_core::clipboard::{Clip, Clipboard, MemoryClipboard};
+use clip_core::clipboard::{Clip, Clipboard, FileData, MemoryClipboard};
 use clip_core::sync::Engine;
 use clip_core::{pairing, State};
 use tokio::net::{TcpListener, TcpStream};
@@ -150,6 +150,38 @@ async fn image_reaches_the_other_device() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("image never arrived");
+}
+
+#[tokio::test]
+async fn files_reach_the_other_device() {
+    let mut a = State::generate("mac").unwrap();
+    let mut b = State::generate("windows").unwrap();
+    pair(&mut a, &mut b, "555555", "555555").await.unwrap();
+
+    let clip_b = MemoryClipboard::default();
+    let (_engine_b, addr_b) = serve(b, clip_b.clone()).await;
+    let engine_a = Engine::new(a, None, Box::new(MemoryClipboard::default()));
+
+    let files = Clip::Files(vec![
+        FileData {
+            name: "notes.txt".into(),
+            data: b"hello".to_vec(),
+        },
+        FileData {
+            name: "data.bin".into(),
+            data: (0..100_000).map(|i| (i % 253) as u8).collect(),
+        },
+    ]);
+    engine_a.push(addr_b, &files).await.unwrap();
+
+    let mut clip_b = clip_b;
+    for _ in 0..40 {
+        if clip_b.get().as_ref() == Some(&files) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("files never arrived");
 }
 
 #[tokio::test]

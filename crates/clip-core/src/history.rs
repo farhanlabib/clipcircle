@@ -1,5 +1,5 @@
 //! A short, local history of what was copied here or received from the circle.
-//! Only text is kept in full; images are listed but not stored.
+//! Only text is kept in full; images and files are listed but not stored.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,6 +19,7 @@ pub const MAX_TEXT: usize = 64 * 1024;
 pub enum Content {
     Text { text: String, truncated: bool },
     Image { width: usize, height: usize },
+    Files { names: Vec<String> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +69,9 @@ fn content_of(clip: &Clip) -> Content {
         Clip::Image { width, height, .. } => Content::Image {
             width: *width,
             height: *height,
+        },
+        Clip::Files(files) => Content::Files {
+            names: files.iter().map(|f| f.name.clone()).collect(),
         },
     }
 }

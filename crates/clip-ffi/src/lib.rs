@@ -68,6 +68,8 @@ impl Clipboard for AppClipboard {
         match clip {
             Clip::Text(text) => self.listener.on_clip(text.clone()),
             Clip::Image { .. } => self.listener.on_image(clip.to_png()?),
+            // Files on mobile come later.
+            Clip::Files(_) => tracing::info!("ignoring copied files on mobile"),
         }
         self.current = Some(clip.clone());
         Ok(())
