@@ -183,3 +183,37 @@ async fn removed_device_is_rejected_and_removal_spreads() {
         .await
         .is_err());
 }
+
+#[tokio::test]
+async fn received_clips_are_recorded_in_history() {
+    let mut a = State::generate("mac").unwrap();
+    let mut b = State::generate("windows").unwrap();
+    pair(&mut a, &mut b, "555555", "555555").await.unwrap();
+
+    let dir = std::env::temp_dir().join(format!("uc-e2e-{}", rand::random::<u64>()));
+    let history_path = clip_core::history::History::path_for(&dir.join("b.json"));
+    let history = clip_core::history::History::load(&history_path).unwrap();
+    let engine_b = Engine::new(b, None, Box::new(MemoryClipboard::default())).with_history(history);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let e = engine_b.clone();
+    tokio::spawn(async move { e.serve(listener).await });
+
+    let engine_a = Engine::new(a, None, Box::new(MemoryClipboard::default()));
+    engine_a
+        .push(addr, &Clip::Text("remember me".into()))
+        .await
+        .unwrap();
+
+    for _ in 0..40 {
+        let h = clip_core::history::History::load(&history_path).unwrap();
+        if let Some(e) = h.entries().next() {
+            assert_eq!(e.from, "mac");
+            assert_eq!(e.full_text(), Some("remember me"));
+            std::fs::remove_dir_all(dir).unwrap();
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("clip never reached the history");
+}

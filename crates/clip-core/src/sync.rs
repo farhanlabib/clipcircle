@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 
 use crate::clipboard::{Clip, Clipboard, WireClip};
 use crate::discovery::PeerMap;
+use crate::history::History;
 use crate::protocol::Message;
 use crate::transport::{self, SecureStream};
 use crate::State;
@@ -30,6 +31,7 @@ pub struct Engine {
     /// Hash of the last clip we sent or received, so we don't echo it back.
     last: Arc<Mutex<Option<[u8; 32]>>>,
     pub peers: PeerMap,
+    history: Option<Arc<std::sync::Mutex<History>>>,
 }
 
 impl Engine {
@@ -40,6 +42,21 @@ impl Engine {
             clipboard: Arc::new(Mutex::new(clipboard)),
             last: Arc::new(Mutex::new(None)),
             peers: PeerMap::default(),
+            history: None,
+        }
+    }
+
+    /// Records every clip copied here or received into `history`.
+    pub fn with_history(mut self, history: History) -> Self {
+        self.history = Some(Arc::new(std::sync::Mutex::new(history)));
+        self
+    }
+
+    fn record(&self, from: &str, clip: &Clip) {
+        if let Some(history) = &self.history {
+            if let Err(e) = history.lock().unwrap().record(from, clip) {
+                tracing::warn!("could not save clipboard history: {e:#}");
+            }
         }
     }
 
@@ -76,6 +93,8 @@ impl Engine {
                 }
                 *last = Some(hash);
             }
+            let me = self.state.lock().await.device.name.clone();
+            self.record(&me, &clip);
             self.broadcast(&clip).await;
         }
     }
@@ -138,6 +157,7 @@ impl Engine {
         };
         let clip = tokio::task::spawn_blocking(move || Clip::from_wire(clip)).await??;
         tracing::info!(from, bytes = clip.len(), "received clip");
+        self.record(&from, &clip);
         let mut last = self.last.lock().await;
         let mut clipboard = self.clipboard.lock().await;
         let digest = clip.digest();

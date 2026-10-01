@@ -4,10 +4,11 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use clip_core::clipboard::SystemClipboard;
+use clip_core::clipboard::{Clip, Clipboard, SystemClipboard};
 use clip_core::discovery::{self, PAIR_SERVICE, SYNC_SERVICE};
+use clip_core::history::{Content, History};
 use clip_core::sync::Engine;
 use clip_core::{pairing, State};
 use tokio::net::{TcpListener, TcpStream};
@@ -45,6 +46,22 @@ enum Command {
     Run {
         #[arg(long, default_value_t = 47800)]
         port: u16,
+        /// Don't keep a history of copied text on this device.
+        #[arg(long)]
+        no_history: bool,
+    },
+    /// Show recently copied and received clips, newest first.
+    History {
+        /// How many entries to show.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Put entry N (as numbered in the list) back on the clipboard; a
+        /// running `clipd run` then sends it to the circle.
+        #[arg(long, value_name = "N")]
+        copy: Option<usize>,
+        /// Delete the history on this device.
+        #[arg(long)]
+        clear: bool,
     },
 }
 
@@ -104,7 +121,26 @@ async fn main() -> Result<()> {
             state.save(&path)?;
             println!("Removed {} ({}) from the circle.", removed.name, removed.id);
         }
-        Command::Run { port } => {
+        Command::History { limit, copy, clear } => {
+            let mut history = History::load(&History::path_for(&path))?;
+            if clear {
+                history.clear()?;
+                println!("History cleared.");
+            } else if let Some(n) = copy {
+                let entry = history
+                    .entries()
+                    .nth(n.wrapping_sub(1))
+                    .context("no such entry")?;
+                let text = entry
+                    .full_text()
+                    .context("only complete text entries can be copied back")?;
+                SystemClipboard::new()?.set(&Clip::Text(text.to_owned()))?;
+                println!("Copied entry {n} to the clipboard.");
+            } else {
+                print_history(&history, limit);
+            }
+        }
+        Command::Run { port, no_history } => {
             let listener = TcpListener::bind(("0.0.0.0", port)).await?;
             let _ad = discovery::advertise(
                 SYNC_SERVICE,
@@ -112,7 +148,12 @@ async fn main() -> Result<()> {
                 port,
                 &[("circle", &state.circle_id), ("device", &state.device.id)],
             )?;
-            let engine = Engine::new(state.clone(), Some(path), Box::new(SystemClipboard::new()?));
+            let history_path = History::path_for(&path);
+            let mut engine =
+                Engine::new(state.clone(), Some(path), Box::new(SystemClipboard::new()?));
+            if !no_history {
+                engine = engine.with_history(History::load(&history_path)?);
+            }
             let _browser = discovery::browse_circle(
                 state.circle_id.clone(),
                 state.device.id.clone(),
@@ -130,4 +171,45 @@ async fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_history(history: &History, limit: usize) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut empty = true;
+    for (i, e) in history.entries().take(limit).enumerate() {
+        empty = false;
+        let preview = match &e.content {
+            Content::Text { text, truncated } => {
+                let line = text.lines().next().unwrap_or("");
+                let mut p: String = line.chars().take(60).collect();
+                if *truncated || p.len() < text.len() {
+                    p.push('…');
+                }
+                p
+            }
+            Content::Image { width, height } => format!("[image {width}x{height}]"),
+        };
+        println!(
+            "{:>3}  {:>8}  {:<16}  {}",
+            i + 1,
+            ago(now.saturating_sub(e.at)),
+            e.from,
+            preview
+        );
+    }
+    if empty {
+        println!("Nothing copied yet. History is recorded while `clipd run` is running.");
+    }
+}
+
+fn ago(secs: u64) -> String {
+    match secs {
+        0..=59 => format!("{secs}s ago"),
+        60..=3599 => format!("{}m ago", secs / 60),
+        3600..=86399 => format!("{}h ago", secs / 3600),
+        _ => format!("{}d ago", secs / 86400),
+    }
 }

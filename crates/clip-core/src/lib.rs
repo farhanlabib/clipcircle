@@ -4,6 +4,7 @@
 
 pub mod clipboard;
 pub mod discovery;
+pub mod history;
 pub mod keychain;
 pub mod pairing;
 pub mod protocol;

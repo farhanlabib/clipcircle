@@ -25,7 +25,10 @@ clipd run
 ```
 
 Copy text or an image on one device and paste it on the other. `clipd devices`
-lists the circle; `clipd remove <name or id>` takes a device out of it. Use `--state <file>` to run more than one device on one machine.
+lists the circle; `clipd remove <name or id>` takes a device out of it.
+`clipd history` lists the last clips copied or received while `clipd run` was
+running (`--copy N` puts one back, `--clear` deletes it, `run --no-history`
+turns it off). Only text is kept, at most 50 entries, in a file only you can read. Use `--state <file>` to run more than one device on one machine.
 
 ## How it works
 
