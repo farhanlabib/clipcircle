@@ -57,6 +57,9 @@ enum Command {
         /// How long to look for devices on the network, in seconds.
         #[arg(long, default_value_t = 5)]
         wait: u64,
+        /// The port `clipd run --port` uses on this device.
+        #[arg(long, default_value_t = DEFAULT_PORT)]
+        port: u16,
         /// Also check a device at this address (IP or IP:port), for networks
         /// that block discovery.
         #[arg(long)]
@@ -152,7 +155,7 @@ async fn main() -> Result<()> {
                 print_history(&history, limit);
             }
         }
-        Command::Doctor { wait, addr } => doctor(state, wait, addr).await?,
+        Command::Doctor { wait, port, addr } => doctor(state, wait, port, addr).await?,
         Command::Run { port, no_history } => {
             let listener = TcpListener::bind(("0.0.0.0", port)).await?;
             let _ad = discovery::advertise(
@@ -186,7 +189,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn doctor(state: State, wait: u64, extra: Vec<String>) -> Result<()> {
+async fn doctor(state: State, wait: u64, port: u16, extra: Vec<String>) -> Result<()> {
     println!("This device: {} ({})", state.device.name, state.device.id);
     let mut ips: Vec<String> = if_addrs::get_if_addrs()
         .unwrap_or_default()
@@ -200,14 +203,12 @@ async fn doctor(state: State, wait: u64, extra: Vec<String>) -> Result<()> {
     } else {
         println!("Network: {}", ips.join(", "));
     }
-    match TcpListener::bind(("0.0.0.0", DEFAULT_PORT)).await {
+    match TcpListener::bind(("0.0.0.0", port)).await {
         Ok(_) => println!(
-            "Sync port {DEFAULT_PORT}: free, so nothing is syncing on this device right now \
-             (start `clipd run` or the tray app)."
+            "Sync port {port}: free, so nothing is syncing on this device right now \
+             (start `clipd run` or the tray app, or pass the port it uses with --port)."
         ),
-        Err(_) => {
-            println!("Sync port {DEFAULT_PORT}: in use, so clipd or the tray app is running here.")
-        }
+        Err(_) => println!("Sync port {port}: in use, so clipd or the tray app is running here."),
     }
     if state.members.is_empty() {
         println!("No other devices in the circle yet. Run `clipd pair` here and `clipd join <code>` on another device.");

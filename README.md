@@ -41,7 +41,8 @@ network addresses, whether something is syncing here, and for each device in
 the circle whether it was found on the network and answered, with a hint when
 not (firewall, router blocking discovery, app not running, removed). On
 networks that block discovery, `clipd doctor --addr 192.168.1.20` checks a
-device directly. The tray app shows a green dot next to devices seen on the
+device directly. If this device syncs on another port (`run --port`), pass
+the same `--port` to `doctor`. The tray app shows a green dot next to devices seen on the
 network and has a **Check connections** button that runs the same check.
 
 ## Tray app
