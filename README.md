@@ -7,7 +7,7 @@ with no server or account.
 ## Status
 
 Text, image and file sync between desktop devices (macOS, Windows, Linux),
-with the `clipd` CLI or the tray app, plus an Android app (text and images).
+with the `clipd` CLI or the tray app, plus an Android app.
 Devices can be removed from a circle, and recent clips are kept in a local
 history. iOS will need
 the app to be opened (or a Share/Shortcut action) to send, because iOS does not
@@ -82,9 +82,11 @@ To build one locally: `cd crates/clip-tray && npx @tauri-apps/cli@2 build`.
 `android/` is a small Android app (Android 10+) on top of `crates/clip-ffi`,
 the UniFFI bindings to the same Rust core. It keeps syncing in a foreground
 service, so text and images from your other devices land on the phone's
-clipboard. Android only lets the app in front read the clipboard, so to send
-from the phone tap **Send clipboard** in the app or the notification, or share
-text or an image to **Send to my devices**. Photos larger than 4096 pixels on
+clipboard. Files copied on a computer are saved to Downloads/Universal
+Clipboard, put on the clipboard, and announced in a notification. Android only
+lets the app in front read the clipboard, so to send from the phone tap **Send
+clipboard** in the app or the notification, or share text, an image or files
+(up to 32 MB) to **Send to my devices**. Photos larger than 4096 pixels on
 a side are scaled down before sending.
 
 CI builds a debug APK on every push (download it from the run's artifacts).
@@ -116,4 +118,3 @@ Code layout:
 - A removal only spreads when a member that knows about it syncs with the others, and a removed device that pairs again through a member that hasn't heard yet can be removed again by gossip.
 - Images are read from the clipboard on every poll, which costs more than text for big images.
 - One connection per push, and files travel in one message, so file sync is capped at 32 MiB.
-- Android doesn't send or receive files yet.

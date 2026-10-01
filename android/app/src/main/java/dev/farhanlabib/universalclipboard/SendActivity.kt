@@ -13,8 +13,8 @@ import java.io.ByteArrayOutputStream
 
 /**
  * Android only lets the app in front read the clipboard. This invisible screen
- * comes to the front, reads it (or takes text or an image shared from another
- * app), sends it to the circle and closes.
+ * comes to the front, reads it (or takes text, an image or files shared from
+ * another app), sends it to the circle and closes.
  */
 class SendActivity : Activity() {
     private var handled = false
@@ -22,10 +22,21 @@ class SendActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val intent = intent ?: return
-        if (intent.action != Intent.ACTION_SEND) return
-        handled = true
-        val image = if (intent.type?.startsWith("image/") == true) streamOf(intent) else null
-        if (image != null) sendImage(image) else sendText(intent.getStringExtra(Intent.EXTRA_TEXT))
+        when (intent.action) {
+            Intent.ACTION_SEND -> {
+                handled = true
+                val stream = streamOf(intent)
+                when {
+                    stream == null -> sendText(intent.getStringExtra(Intent.EXTRA_TEXT))
+                    intent.type?.startsWith("image/") == true -> sendImage(stream)
+                    else -> sendFiles(listOf(stream))
+                }
+            }
+            Intent.ACTION_SEND_MULTIPLE -> {
+                handled = true
+                sendFiles(streamsOf(intent))
+            }
+        }
     }
 
     // The clipboard can only be read once this window has focus.
@@ -35,12 +46,18 @@ class SendActivity : Activity() {
         handled = true
         val clipboard = getSystemService(ClipboardManager::class.java)
         val clip = clipboard.primaryClip?.takeIf { it.itemCount > 0 }
-        val item = clip?.getItemAt(0)
-        val uri = item?.uri
-        if (uri != null && clip?.description?.hasMimeType("image/*") == true) {
-            sendImage(uri)
-        } else {
-            sendText(item?.coerceToText(this)?.toString())
+        if (clip == null) {
+            sendText(null)
+            return
+        }
+        val item = clip.getItemAt(0)
+        val uri = item.uri
+        when {
+            uri != null && clip.description.hasMimeType("image/*") -> sendImage(uri)
+            // Copied files: URIs without text.
+            uri != null && item.text == null ->
+                sendFiles((0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri })
+            else -> sendText(item.coerceToText(this)?.toString())
         }
     }
 
@@ -51,6 +68,22 @@ class SendActivity : Activity() {
             @Suppress("DEPRECATION")
             intent.getParcelableExtra(Intent.EXTRA_STREAM)
         }
+
+    private fun streamsOf(intent: Intent): List<Uri> =
+        if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+        } ?: emptyList()
+
+    private fun sendFiles(uris: List<Uri>) {
+        if (uris.isEmpty()) {
+            done("Nothing to send")
+            return
+        }
+        send { clipApp.node.sendFiles(ReceivedFiles.read(this, uris)) }
+    }
 
     private fun sendText(text: String?) {
         if (text.isNullOrEmpty()) {

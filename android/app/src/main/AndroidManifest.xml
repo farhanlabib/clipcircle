@@ -26,7 +26,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Sends the clipboard (or shared text or image) to the circle, then closes. -->
+        <!-- Sends the clipboard (or shared text, images or files) to the circle, then closes. -->
         <activity
             android:name=".SendActivity"
             android:exported="true"
@@ -37,8 +37,12 @@
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-                <data android:mimeType="image/*" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
 

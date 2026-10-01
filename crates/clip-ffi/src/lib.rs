@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use clip_core::clipboard::{Clip, Clipboard};
+use clip_core::clipboard::{self, Clip, Clipboard, FileData};
 use clip_core::service::{self, Options, Service};
 use clip_core::State;
 
@@ -40,10 +40,18 @@ pub trait ClipListener: Send + Sync {
     fn on_clip(&self, text: String);
     /// An image arrived from the circle, as PNG bytes.
     fn on_image(&self, png: Vec<u8>);
+    /// Files copied on another device arrived. Names are bare file names.
+    fn on_files(&self, files: Vec<SharedFile>);
     /// A device joined with the pairing code being shown.
     fn on_paired(&self, device_name: String);
     /// Showing a pairing code ended without a device joining.
     fn on_pairing_failed(&self, message: String);
+}
+
+#[derive(uniffi::Record)]
+pub struct SharedFile {
+    pub name: String,
+    pub data: Vec<u8>,
 }
 
 #[derive(uniffi::Record)]
@@ -68,8 +76,15 @@ impl Clipboard for AppClipboard {
         match clip {
             Clip::Text(text) => self.listener.on_clip(text.clone()),
             Clip::Image { .. } => self.listener.on_image(clip.to_png()?),
-            // Files on mobile come later.
-            Clip::Files(_) => tracing::info!("ignoring copied files on mobile"),
+            Clip::Files(files) => self.listener.on_files(
+                files
+                    .iter()
+                    .map(|f| SharedFile {
+                        name: f.name.clone(),
+                        data: f.data.clone(),
+                    })
+                    .collect(),
+            ),
         }
         self.current = Some(clip.clone());
         Ok(())
@@ -171,6 +186,34 @@ impl Node {
         Ok(())
     }
 
+    /// Sends files the user shared, up to 32 MiB in total. Names are cleaned
+    /// up into bare file names.
+    pub fn send_files(&self, files: Vec<SharedFile>) -> Result<()> {
+        if files.is_empty() {
+            return Err(anyhow::anyhow!("no files to send").into());
+        }
+        let total: usize = files.iter().map(|f| f.data.len()).sum();
+        if total > clipboard::MAX_FILES_BYTES {
+            return Err(anyhow::anyhow!(
+                "files larger than {} MiB can't be sent yet",
+                clipboard::MAX_FILES_BYTES >> 20
+            )
+            .into());
+        }
+        let clip = Clip::Files(
+            files
+                .into_iter()
+                .map(|f| FileData {
+                    name: clean_file_name(&f.name),
+                    data: f.data,
+                })
+                .collect(),
+        );
+        let engine = self.engine()?;
+        self.runtime.block_on(engine.send_local(clip));
+        Ok(())
+    }
+
     /// Shows a new pairing code; the outcome arrives through the listener.
     pub fn start_pairing(&self) -> Result<String> {
         let guard = self.service.lock().unwrap();
@@ -221,8 +264,38 @@ impl Node {
     }
 }
 
+/// Turns a display name from another app into a safe bare file name.
+fn clean_file_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '\0' => '_',
+            c => c,
+        })
+        .collect();
+    let cleaned = cleaned.trim();
+    if clipboard::is_safe_file_name(cleaned) {
+        cleaned.to_owned()
+    } else {
+        "file".to_owned()
+    }
+}
+
 fn not_running() -> NodeError {
     NodeError::Failed {
         message: "syncing is not running".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_names_are_cleaned() {
+        assert_eq!(clean_file_name("report.pdf"), "report.pdf");
+        assert_eq!(clean_file_name("a/b\\c:d.txt"), "a_b_c_d.txt");
+        assert_eq!(clean_file_name(".."), "file");
+        assert_eq!(clean_file_name("  "), "file");
     }
 }

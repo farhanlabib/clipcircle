@@ -9,6 +9,7 @@ import android.os.Looper
 import java.util.concurrent.Executors
 import uniffi.clip_ffi.ClipListener
 import uniffi.clip_ffi.Node
+import uniffi.clip_ffi.SharedFile
 
 /** Owns the Rust node for the whole app. Node calls block, so use [worker]. */
 class ClipApp : Application() {
@@ -39,6 +40,11 @@ class ClipApp : Application() {
                     val clipboard = getSystemService(ClipboardManager::class.java)
                     clipboard.setPrimaryClip(ClipData.newUri(contentResolver, "Image from your devices", uri))
                 }
+            }
+
+            override fun onFiles(files: List<SharedFile>) {
+                val uris = ReceivedFiles.save(this@ClipApp, files)
+                main.post { ReceivedFiles.announce(this@ClipApp, files.map { it.name }, uris) }
             }
 
             override fun onPaired(deviceName: String) {
