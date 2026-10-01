@@ -33,8 +33,25 @@ pub fn store(device_id: &str, private_key: &str) -> Result<()> {
 
 #[cfg(feature = "os-keychain")]
 pub fn load(device_id: &str) -> Result<String> {
-    Ok(entry(device_id)?.get_password()?)
+    // macOS asks before letting a rebuilt (differently signed) binary read the
+    // key, and the read blocks until someone answers. Say so instead of hanging
+    // silently.
+    let (done, waiting) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        if waiting.recv_timeout(HINT_AFTER) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+            eprintln!(
+                "Waiting for access to this device's key in the OS keychain. \
+                 If a dialog asks, enter your password and choose \"Always Allow\"."
+            );
+        }
+    });
+    let key = entry(device_id)?.get_password();
+    let _ = done.send(());
+    Ok(key?)
 }
+
+#[cfg(feature = "os-keychain")]
+const HINT_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[cfg(not(feature = "os-keychain"))]
 pub fn store(_device_id: &str, _private_key: &str) -> Result<()> {
