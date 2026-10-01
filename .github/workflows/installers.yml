@@ -1,14 +1,10 @@
 name: Installers
 
+# Not on pull requests: bundling on macOS and Windows uses many Actions
+# minutes. Run it by hand on a branch when a PR changes packaging.
 on:
   push:
     branches: [main]
-  pull_request:
-    paths:
-      - "crates/clip-core/**"
-      - "crates/clip-tray/**"
-      - "Cargo.lock"
-      - ".github/workflows/installers.yml"
   workflow_dispatch:
 
 jobs:
