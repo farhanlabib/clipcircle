@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Universal Clipboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1 id="device-name">Universal Clipboard</h1>
+      <p class="muted" id="sync-state">Starting…</p>
+    </div>
+    <label class="switch" title="Sync on or off">
+      <input type="checkbox" id="sync-toggle" checked>
+      <span></span>
+    </label>
+  </header>
+
+  <p class="error" id="error" hidden></p>
+
+  <section>
+    <h2>Devices in your circle</h2>
+    <ul id="members" class="list"></ul>
+    <div class="row">
+      <button id="pair-btn">Add a device</button>
+      <button id="join-btn" class="secondary">Join a circle</button>
+    </div>
+    <div id="pair-panel" class="panel" hidden>
+      <p>On the other device, choose <b>Join a circle</b> and type:</p>
+      <p class="code" id="pair-code"></p>
+      <p class="muted" id="pair-status">Waiting for the other device…</p>
+    </div>
+    <form id="join-panel" class="panel" hidden>
+      <p>Type the 6-digit code shown on a device in the circle you want to join.</p>
+      <div class="row">
+        <input id="join-code" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="off">
+        <button type="submit">Join</button>
+      </div>
+      <p class="muted" id="join-status"></p>
+    </form>
+  </section>
+
+  <section>
+    <h2>Recent clips</h2>
+    <ul id="history" class="list history"></ul>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>

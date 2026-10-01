@@ -30,6 +30,21 @@ lists the circle; `clipd remove <name or id>` takes a device out of it.
 running (`--copy N` puts one back, `--clear` deletes it, `run --no-history`
 turns it off). Only text is kept, at most 50 entries, in a file only you can read. Use `--state <file>` to run more than one device on one machine.
 
+## Tray app
+
+`crates/clip-tray` is a menu bar (macOS) / system tray (Windows, Linux) app
+built with Tauri. It runs syncing in the background and has a small window to
+add a device (shows a pairing code), join a circle (type a code), remove
+devices, pause syncing, and click a recent clip to copy it again.
+
+```sh
+cargo run -p clip-tray --release
+```
+
+It uses the same state file as `clipd` (`CLIPD_STATE` overrides the path), so
+don't run both at once. On Linux it needs the WebKitGTK and appindicator
+libraries; see `.github/workflows/ci.yml` for the package list.
+
 ## How it works
 
 | Piece | Choice |
@@ -45,6 +60,7 @@ Code layout:
 
 - `crates/clip-core`: everything platform-independent (`state`, `pairing`, `transport`, `discovery`, `sync`).
 - `crates/clipd`: the CLI daemon.
+- `crates/clip-tray`: the tray app (Tauri; the window is plain HTML/JS in `ui/`).
 
 ## Known gaps
 

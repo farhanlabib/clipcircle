@@ -217,3 +217,21 @@ async fn received_clips_are_recorded_in_history() {
     }
     panic!("clip never reached the history");
 }
+
+#[tokio::test]
+async fn paused_device_neither_sends_nor_receives() {
+    let mut a = State::generate("mac").unwrap();
+    let mut b = State::generate("windows").unwrap();
+    pair(&mut a, &mut b, "666666", "666666").await.unwrap();
+
+    let clip_b = MemoryClipboard::default();
+    let (engine_b, addr_b) = serve(b.clone(), clip_b.clone()).await;
+    engine_b.set_paused(true);
+    let engine_a = Engine::new(a, None, Box::new(MemoryClipboard::default()));
+    assert!(engine_a
+        .push(addr_b, &Clip::Text("secret".into()))
+        .await
+        .is_err());
+    let mut clip_b = clip_b;
+    assert_eq!(clip_b.get(), None);
+}

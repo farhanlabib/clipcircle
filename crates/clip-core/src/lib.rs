@@ -8,6 +8,7 @@ pub mod history;
 pub mod keychain;
 pub mod pairing;
 pub mod protocol;
+pub mod service;
 pub mod state;
 pub mod sync;
 pub mod transport;

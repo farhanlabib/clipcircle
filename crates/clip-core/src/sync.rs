@@ -6,6 +6,7 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,7 +16,7 @@ use tokio::sync::Mutex;
 
 use crate::clipboard::{Clip, Clipboard, WireClip};
 use crate::discovery::PeerMap;
-use crate::history::History;
+use crate::history::{Entry, History};
 use crate::protocol::Message;
 use crate::transport::{self, SecureStream};
 use crate::State;
@@ -32,6 +33,8 @@ pub struct Engine {
     last: Arc<Mutex<Option<[u8; 32]>>>,
     pub peers: PeerMap,
     history: Option<Arc<std::sync::Mutex<History>>>,
+    /// While set, nothing is sent and incoming clips are refused.
+    paused: Arc<AtomicBool>,
 }
 
 impl Engine {
@@ -43,7 +46,34 @@ impl Engine {
             last: Arc::new(Mutex::new(None)),
             peers: PeerMap::default(),
             history: None,
+            paused: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+
+    /// Recorded clips, newest first (empty without a history).
+    pub fn history_entries(&self) -> Vec<Entry> {
+        match &self.history {
+            Some(h) => h.lock().unwrap().entries().cloned().collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Changes the circle state and saves it.
+    pub async fn update_state<R>(&self, f: impl FnOnce(&mut State) -> R) -> Result<R> {
+        let mut state = self.state.lock().await;
+        let r = f(&mut state);
+        if let Some(path) = &self.state_path {
+            state.save(path)?;
+        }
+        Ok(r)
     }
 
     /// Records every clip copied here or received into `history`.
@@ -93,10 +123,27 @@ impl Engine {
                 }
                 *last = Some(hash);
             }
+            // Copies made while paused are marked seen above, so they are not
+            // sent later when syncing resumes.
+            if self.is_paused() {
+                continue;
+            }
             let me = self.state.lock().await.device.name.clone();
             self.record(&me, &clip);
             self.broadcast(&clip).await;
         }
+    }
+
+    /// Sends a clip copied on this device, for platforms where the app hands
+    /// over copies itself instead of [`Engine::watch`] polling for them.
+    pub async fn send_local(&self, clip: Clip) {
+        *self.last.lock().await = Some(clip.digest());
+        if self.is_paused() {
+            return;
+        }
+        let me = self.state.lock().await.device.name.clone();
+        self.record(&me, &clip);
+        self.broadcast(&clip).await;
     }
 
     pub async fn broadcast(&self, clip: &Clip) {
@@ -147,6 +194,9 @@ impl Engine {
     }
 
     async fn handle_incoming(&self, stream: TcpStream) -> Result<()> {
+        if self.is_paused() {
+            bail!("syncing is paused");
+        }
         let key = self.state.lock().await.private_key_bytes()?;
         let mut chan = transport::sync_responder(stream, &key).await?;
         let from = self.check_member(&chan).await?;
