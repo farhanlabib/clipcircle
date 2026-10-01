@@ -33,6 +33,14 @@ class ClipApp : Application() {
                 }
             }
 
+            override fun onImage(png: ByteArray) {
+                val uri = ClipImageProvider.save(this@ClipApp, png)
+                main.post {
+                    val clipboard = getSystemService(ClipboardManager::class.java)
+                    clipboard.setPrimaryClip(ClipData.newUri(contentResolver, "Image from your devices", uri))
+                }
+            }
+
             override fun onPaired(deviceName: String) {
                 main.post { onPairingResult?.invoke(true, deviceName) }
             }

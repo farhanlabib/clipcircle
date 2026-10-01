@@ -3,24 +3,29 @@ package dev.farhanlabib.universalclipboard
 import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
+import java.io.ByteArrayOutputStream
 
 /**
  * Android only lets the app in front read the clipboard. This invisible screen
- * comes to the front, reads it (or takes text shared from another app), sends
- * it to the circle and closes.
+ * comes to the front, reads it (or takes text or an image shared from another
+ * app), sends it to the circle and closes.
  */
 class SendActivity : Activity() {
     private var handled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (intent?.action == Intent.ACTION_SEND) {
-            val shared = intent.getStringExtra(Intent.EXTRA_TEXT)
-            handled = true
-            send(shared)
-        }
+        val intent = intent ?: return
+        if (intent.action != Intent.ACTION_SEND) return
+        handled = true
+        val image = if (intent.type?.startsWith("image/") == true) streamOf(intent) else null
+        if (image != null) sendImage(image) else sendText(intent.getStringExtra(Intent.EXTRA_TEXT))
     }
 
     // The clipboard can only be read once this window has focus.
@@ -29,28 +34,72 @@ class SendActivity : Activity() {
         if (!hasFocus || handled) return
         handled = true
         val clipboard = getSystemService(ClipboardManager::class.java)
-        val text = clipboard.primaryClip
-            ?.takeIf { it.itemCount > 0 }
-            ?.getItemAt(0)
-            ?.coerceToText(this)
-            ?.toString()
-        send(text)
+        val clip = clipboard.primaryClip?.takeIf { it.itemCount > 0 }
+        val item = clip?.getItemAt(0)
+        val uri = item?.uri
+        if (uri != null && clip?.description?.hasMimeType("image/*") == true) {
+            sendImage(uri)
+        } else {
+            sendText(item?.coerceToText(this)?.toString())
+        }
     }
 
-    private fun send(text: String?) {
+    private fun streamOf(intent: Intent): Uri? =
+        if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        }
+
+    private fun sendText(text: String?) {
         if (text.isNullOrEmpty()) {
-            toast("Nothing to send")
-            finish()
+            done("Nothing to send")
             return
         }
+        send { clipApp.node.sendText(text) }
+    }
+
+    // Read before finishing, while this screen still holds access to the URI.
+    private fun sendImage(uri: Uri) = send { clipApp.node.sendImage(readAsPng(uri)) }
+
+    private fun send(work: () -> Unit) {
         clipApp.background({
             if (!clipApp.node.isRunning()) clipApp.node.start()
-            clipApp.node.sendText(text)
+            work()
         }) { result ->
-            toast(if (result.isSuccess) "Sent to your devices" else "Could not send: ${result.exceptionOrNull()?.message}")
-            finish()
+            done(if (result.isSuccess) "Sent to your devices" else "Could not send: ${result.exceptionOrNull()?.message}")
         }
     }
 
-    private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    /** PNG bytes for the image at [uri], scaled down if it is very large. */
+    private fun readAsPng(uri: Uri): ByteArray {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        contentResolver.openInputStream(uri)!!.use { BitmapFactory.decodeStream(it, null, bounds) }
+        val longest = maxOf(bounds.outWidth, bounds.outHeight)
+        require(longest > 0) { "not an image" }
+        if (bounds.outMimeType == "image/png" && longest <= MAX_SIDE) {
+            return contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+        }
+        var sample = 1
+        while (longest / sample > MAX_SIDE) sample *= 2
+        val options = BitmapFactory.Options().apply { inSampleSize = sample }
+        val bitmap = contentResolver.openInputStream(uri)!!.use { BitmapFactory.decodeStream(it, null, options) }
+            ?: error("not an image")
+        return ByteArrayOutputStream().use { out ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            bitmap.recycle()
+            out.toByteArray()
+        }
+    }
+
+    private fun done(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        finish()
+    }
+
+    private companion object {
+        /** Photos are scaled so their longest side is at most this many pixels. */
+        const val MAX_SIDE = 4096
+    }
 }

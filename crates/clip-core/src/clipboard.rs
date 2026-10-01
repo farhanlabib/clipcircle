@@ -50,6 +50,23 @@ impl Clip {
         self.len() == 0
     }
 
+    /// Decodes a PNG into an image clip.
+    pub fn from_png(bytes: &[u8]) -> Result<Self> {
+        decode_png(bytes)
+    }
+
+    /// The image as PNG bytes; fails for text.
+    pub fn to_png(&self) -> Result<Vec<u8>> {
+        match self {
+            Clip::Text(_) => bail!("not an image"),
+            Clip::Image {
+                width,
+                height,
+                rgba,
+            } => encode_png(*width, *height, rgba),
+        }
+    }
+
     /// Wire form: images travel as PNG, which is far smaller than raw RGBA.
     pub fn to_wire(&self) -> Result<WireClip> {
         Ok(match self {
@@ -215,6 +232,18 @@ mod tests {
         };
         let back = Clip::from_wire(clip.to_wire().unwrap()).unwrap();
         assert_eq!(back, clip);
+    }
+
+    #[test]
+    fn png_bytes_round_trip_and_text_has_none() {
+        let clip = Clip::Image {
+            width: 2,
+            height: 2,
+            rgba: vec![9; 16],
+        };
+        assert_eq!(Clip::from_png(&clip.to_png().unwrap()).unwrap(), clip);
+        assert!(Clip::Text("hi".into()).to_png().is_err());
+        assert!(Clip::from_png(b"not a png").is_err());
     }
 
     #[test]

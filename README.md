@@ -49,10 +49,11 @@ libraries; see `.github/workflows/ci.yml` for the package list.
 
 `android/` is a small Android app (Android 10+) on top of `crates/clip-ffi`,
 the UniFFI bindings to the same Rust core. It keeps syncing in a foreground
-service, so clips from your other devices land on the phone's clipboard.
-Android only lets the app in front read the clipboard, so to send from the
-phone tap **Send clipboard** in the app or the notification, or share text to
-**Send to my devices**.
+service, so text and images from your other devices land on the phone's
+clipboard. Android only lets the app in front read the clipboard, so to send
+from the phone tap **Send clipboard** in the app or the notification, or share
+text or an image to **Send to my devices**. Photos larger than 4096 pixels on
+a side are scaled down before sending.
 
 CI builds a debug APK on every push (download it from the run's artifacts).
 To build locally you need the Android SDK and NDK, `cargo-ndk`, and Gradle 8.11;

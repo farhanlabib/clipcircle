@@ -26,7 +26,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Sends the clipboard (or shared text) to the circle, then closes. -->
+        <!-- Sends the clipboard (or shared text or image) to the circle, then closes. -->
         <activity
             android:name=".SendActivity"
             android:exported="true"
@@ -38,8 +38,16 @@
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
+                <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
+
+        <!-- Hands images received from the circle to the app that pastes them. -->
+        <provider
+            android:name=".ClipImageProvider"
+            android:authorities="${applicationId}.clips"
+            android:exported="false"
+            android:grantUriPermissions="true" />
 
         <service
             android:name=".SyncService"

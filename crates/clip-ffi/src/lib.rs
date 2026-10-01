@@ -1,6 +1,7 @@
 //! Bindings for the mobile apps. The app owns one [`Node`]: it starts syncing,
-//! hands over what the user copies with [`Node::send_text`], and gets clips
-//! from the circle through [`ClipListener::on_clip`].
+//! hands over what the user copies with [`Node::send_text`] or
+//! [`Node::send_image`], and gets clips from the circle through
+//! [`ClipListener::on_clip`] and [`ClipListener::on_image`].
 //!
 //! Every method blocks until done, so call them off the UI thread.
 
@@ -37,6 +38,8 @@ type Result<T> = std::result::Result<T, NodeError>;
 pub trait ClipListener: Send + Sync {
     /// Text arrived from the circle; put it on the device clipboard.
     fn on_clip(&self, text: String);
+    /// An image arrived from the circle, as PNG bytes.
+    fn on_image(&self, png: Vec<u8>);
     /// A device joined with the pairing code being shown.
     fn on_paired(&self, device_name: String);
     /// Showing a pairing code ended without a device joining.
@@ -64,8 +67,7 @@ impl Clipboard for AppClipboard {
     fn set(&mut self, clip: &Clip) -> anyhow::Result<()> {
         match clip {
             Clip::Text(text) => self.listener.on_clip(text.clone()),
-            // Image paste on mobile comes later.
-            Clip::Image { .. } => tracing::info!("ignoring an image clip on mobile"),
+            Clip::Image { .. } => self.listener.on_image(clip.to_png()?),
         }
         self.current = Some(clip.clone());
         Ok(())
@@ -156,6 +158,14 @@ impl Node {
     pub fn send_text(&self, text: String) -> Result<()> {
         let engine = self.engine()?;
         self.runtime.block_on(engine.send_local(Clip::Text(text)));
+        Ok(())
+    }
+
+    /// Sends an image the user copied or shared, as PNG bytes.
+    pub fn send_image(&self, png: Vec<u8>) -> Result<()> {
+        let clip = Clip::from_png(&png)?;
+        let engine = self.engine()?;
+        self.runtime.block_on(engine.send_local(clip));
         Ok(())
     }
 
