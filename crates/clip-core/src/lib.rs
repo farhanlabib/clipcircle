@@ -4,6 +4,7 @@
 
 pub mod clipboard;
 pub mod discovery;
+pub mod keychain;
 pub mod pairing;
 pub mod protocol;
 pub mod state;

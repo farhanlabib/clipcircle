@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Lets the app's own window call its commands and listen for events.","local":true,"windows":["main"],"permissions":["core:default"]}}

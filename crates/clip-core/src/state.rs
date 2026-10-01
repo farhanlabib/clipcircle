@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
-use crate::transport;
+use crate::{keychain, transport};
 
 /// A device in the circle, identified by its long-term Noise public key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,9 +19,13 @@ pub struct Member {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct State {
     pub device: Member,
-    /// Hex-encoded X25519 static private key.
-    /// TODO: move into the OS keychain (Keychain / DPAPI / Secret Service / Keystore).
+    /// Hex-encoded X25519 static private key. Left out of the state file
+    /// when `key_in_keychain` is set.
+    #[serde(default)]
     pub private_key: String,
+    /// The private key lives in the OS keychain rather than in this file.
+    #[serde(default)]
+    pub key_in_keychain: bool,
     pub circle_id: String,
     /// Other devices in the circle (never includes `device`).
     pub members: Vec<Member>,
@@ -29,6 +33,19 @@ pub struct State {
     /// from a member that hasn't heard about the removal can't re-add them.
     #[serde(default)]
     pub removed: Vec<String>,
+}
+
+/// The state file may hold the private key, so only the owner may read it.
+#[cfg(unix)]
+fn restrict_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restrict_permissions(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 fn random_hex(bytes: usize) -> String {
@@ -48,6 +65,7 @@ impl State {
                 public_key: hex::encode(&keypair.public),
             },
             private_key: hex::encode(&keypair.private),
+            key_in_keychain: false,
             circle_id: random_hex(16),
             members: Vec::new(),
             removed: Vec::new(),
@@ -60,15 +78,31 @@ impl State {
     }
 
     /// Loads the state at `path`, creating a new device there if none exists.
+    ///
+    /// The private key is moved into the OS keychain when one is available;
+    /// otherwise (e.g. Linux without a Secret Service) it stays in the file.
     pub fn load_or_create(path: &Path) -> Result<Self> {
-        if path.exists() {
+        let mut state = if path.exists() {
             let raw = std::fs::read_to_string(path)
                 .with_context(|| format!("reading {}", path.display()))?;
-            return serde_json::from_str(&raw)
-                .with_context(|| format!("parsing {}", path.display()));
+            let mut state: Self = serde_json::from_str(&raw)
+                .with_context(|| format!("parsing {}", path.display()))?;
+            if state.key_in_keychain {
+                state.private_key = keychain::load(&state.device.id)
+                    .context("this device's key is missing from the OS keychain")?;
+                return Ok(state);
+            }
+            state
+        } else {
+            let name = gethostname::gethostname().to_string_lossy().into_owned();
+            Self::generate(name)?
+        };
+        if std::env::var_os("CLIPD_NO_KEYCHAIN").is_none() {
+            match keychain::store(&state.device.id, &state.private_key) {
+                Ok(()) => state.key_in_keychain = true,
+                Err(e) => tracing::warn!("keeping the key in {}: {e:#}", path.display()),
+            }
         }
-        let name = gethostname::gethostname().to_string_lossy().into_owned();
-        let state = Self::generate(name)?;
         state.save(path)?;
         Ok(state)
     }
@@ -77,8 +111,13 @@ impl State {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
+        let mut on_disk = self.clone();
+        if on_disk.key_in_keychain {
+            on_disk.private_key.clear();
+        }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
+        std::fs::write(&tmp, serde_json::to_vec_pretty(&on_disk)?)?;
+        restrict_permissions(&tmp)?;
         std::fs::rename(&tmp, path)?;
         Ok(())
     }
@@ -146,5 +185,30 @@ impl State {
         std::iter::once(self.device.clone())
             .chain(self.members.iter().cloned())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_is_left_out_of_file_when_in_keychain() {
+        let dir = std::env::temp_dir().join(format!("uc-state-{}", random_hex(4)));
+        let path = dir.join("state.json");
+        let mut state = State::generate("test").unwrap();
+        state.key_in_keychain = true;
+        state.save(&path).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains(&state.private_key));
+        // The in-memory state still has it.
+        assert!(!state.private_key.is_empty());
+
+        state.key_in_keychain = false;
+        state.save(&path).unwrap();
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains(&state.private_key));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

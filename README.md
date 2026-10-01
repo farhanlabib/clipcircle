@@ -31,7 +31,7 @@ lists the circle; `clipd remove <name or id>` takes a device out of it. Use `--s
 
 | Piece | Choice |
 | --- | --- |
-| Identity | Each device has an X25519 key pair; the public key is its identity. |
+| Identity | Each device has an X25519 key pair; the public key is its identity. The private key is kept in the OS keychain (Keychain, Credential Manager, Secret Service). Where none is available it stays in the state file, readable only by you. Set `CLIPD_NO_KEYCHAIN=1` to skip the keychain. |
 | Pairing | 6-digit code → SPAKE2 → Noise `NNpsk0`. Wrong codes fail; an attacker gets one guess per attempt. The host shares the circle's member list with the joiner. |
 | Discovery | mDNS: `_clipcircle._tcp` (sync, tagged with the circle id) and `_clipcircle-pair._tcp` (while showing a code). |
 | Transport | TCP + Noise `XX`. Each side must prove a key that is in its circle, otherwise the connection is dropped. |
@@ -45,7 +45,8 @@ Code layout:
 
 ## Known gaps
 
-- The private key is stored in a plain JSON file; it should move to the OS keychain.
+- On macOS an unsigned `clipd` build asks for Keychain access again after every rebuild; choose "Always Allow".
+
 - A removal only spreads when a member that knows about it syncs with the others, and a removed device that pairs again through a member that hasn't heard yet can be removed again by gossip.
 - Images are read from the clipboard on every poll, which costs more than text for big images.
 - One connection per push; fine for text, to be revisited for files.
