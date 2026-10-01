@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context, Result};
@@ -146,14 +145,17 @@ pub trait Clipboard: Send {
     fn set(&mut self, clip: &Clip) -> Result<()>;
 }
 
+#[cfg(feature = "system-clipboard")]
 pub struct SystemClipboard(arboard::Clipboard);
 
+#[cfg(feature = "system-clipboard")]
 impl SystemClipboard {
     pub fn new() -> Result<Self> {
         Ok(Self(arboard::Clipboard::new()?))
     }
 }
 
+#[cfg(feature = "system-clipboard")]
 impl Clipboard for SystemClipboard {
     fn get(&mut self) -> Option<Clip> {
         if let Ok(text) = self.0.get_text() {
@@ -177,7 +179,7 @@ impl Clipboard for SystemClipboard {
             } => self.0.set_image(arboard::ImageData {
                 width: *width,
                 height: *height,
-                bytes: Cow::Borrowed(rgba),
+                bytes: std::borrow::Cow::Borrowed(rgba),
             })?,
         }
         Ok(())

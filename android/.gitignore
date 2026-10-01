@@ -1,0 +1,6 @@
+.gradle/
+build/
+local.properties
+# Generated in CI from the Rust library:
+app/src/main/jniLibs/
+app/src/main/java/uniffi/

@@ -45,6 +45,19 @@ It uses the same state file as `clipd` (`CLIPD_STATE` overrides the path), so
 don't run both at once. On Linux it needs the WebKitGTK and appindicator
 libraries; see `.github/workflows/ci.yml` for the package list.
 
+## Android app
+
+`android/` is a small Android app (Android 10+) on top of `crates/clip-ffi`,
+the UniFFI bindings to the same Rust core. It keeps syncing in a foreground
+service, so clips from your other devices land on the phone's clipboard.
+Android only lets the app in front read the clipboard, so to send from the
+phone tap **Send clipboard** in the app or the notification, or share text to
+**Send to my devices**.
+
+CI builds a debug APK on every push (download it from the run's artifacts).
+To build locally you need the Android SDK and NDK, `cargo-ndk`, and Gradle 8.11;
+the steps are the `android` job in `.github/workflows/ci.yml`.
+
 ## How it works
 
 | Piece | Choice |
@@ -61,6 +74,7 @@ Code layout:
 - `crates/clip-core`: everything platform-independent (`state`, `pairing`, `transport`, `discovery`, `sync`).
 - `crates/clipd`: the CLI daemon.
 - `crates/clip-tray`: the tray app (Tauri; the window is plain HTML/JS in `ui/`).
+- `crates/clip-ffi` and `android/`: the Android app.
 
 ## Known gaps
 

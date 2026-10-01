@@ -1,0 +1,26 @@
+[package]
+name = "clip-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "UniFFI bindings to clip-core for the mobile apps"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "clip_ffi"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+clip-core = { path = "../clip-core", default-features = false }
+anyhow.workspace = true
+tokio.workspace = true
+tracing = "0.1"
+uniffi = "0.29"
+thiserror = "2"

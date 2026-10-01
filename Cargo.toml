@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/clip-core", "crates/clipd", "crates/clip-tray"]
+members = ["crates/clip-core", "crates/clipd", "crates/clip-tray", "crates/clip-ffi"]
 
 [workspace.package]
 version = "0.1.0"
