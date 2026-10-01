@@ -809,6 +809,7 @@ dependencies = [
  "anyhow",
  "clap",
  "clip-core",
+ "if-addrs",
  "tokio",
  "tracing",
  "tracing-subscriber",

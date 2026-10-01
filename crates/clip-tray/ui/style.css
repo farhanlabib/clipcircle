@@ -40,3 +40,11 @@ input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 7px
                        background: #fff; border-radius: 50%; transition: .2s; }
 .switch input:checked + span { background: var(--accent); }
 .switch input:checked + span::before { transform: translateX(18px); }
+.device { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.device .detail { color: var(--muted); font-size: 11px; }
+.device .detail.bad { color: var(--danger); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); opacity: .5;
+       margin-right: 8px; vertical-align: middle; }
+.dot.online { background: #16a34a; opacity: 1; }
+button.link.plain { color: var(--accent); margin-top: 10px; font-size: 12px; }
+button:disabled { opacity: .6; cursor: default; }

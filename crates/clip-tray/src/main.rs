@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clip_core::clipboard::{Clip, Clipboard, SystemClipboard};
 use clip_core::history::Content;
 use clip_core::service::{self, Options, Service};
+use clip_core::sync::Reach;
 use clip_core::State;
 use serde::Serialize;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem};
@@ -54,6 +55,8 @@ impl App {
 struct DeviceView {
     id: String,
     name: String,
+    /// Announced on this network right now.
+    online: bool,
 }
 
 #[derive(Serialize)]
@@ -67,21 +70,60 @@ struct StatusView {
 async fn status(app: tauri::State<'_, App>) -> CmdResult<StatusView> {
     let engine = app.engine().await?;
     let state = engine.state().await;
+    let peers = engine.peers.lock().unwrap().clone();
     Ok(StatusView {
         device: DeviceView {
             id: state.device.id,
             name: state.device.name,
+            online: true,
         },
         members: state
             .members
             .into_iter()
             .map(|m| DeviceView {
+                online: peers.contains_key(&m.id),
                 id: m.id,
                 name: m.name,
             })
             .collect(),
         paused: engine.is_paused(),
     })
+}
+
+#[derive(Serialize)]
+struct CheckView {
+    id: String,
+    ok: bool,
+    /// One line on what the check found, plus a next step when it failed.
+    detail: String,
+}
+
+/// Connects to every device in the circle and reports what worked.
+#[tauri::command]
+async fn check_devices(app: tauri::State<'_, App>) -> CmdResult<Vec<CheckView>> {
+    let engine = app.engine().await?;
+    Ok(engine
+        .check_members()
+        .await
+        .into_iter()
+        .map(|m| {
+            let found = match &m.reach {
+                Reach::Ok { millis, .. } => format!("Connected ({millis} ms)"),
+                Reach::NotFound => String::new(),
+                Reach::Failed { error } => format!("Could not connect: {error}"),
+            };
+            let detail = match (&m.reach, m.reach.hint()) {
+                (Reach::NotFound, Some(hint)) => hint.to_owned(),
+                (_, Some(hint)) => format!("{found}. {hint}"),
+                (_, None) => found,
+            };
+            CheckView {
+                ok: matches!(m.reach, Reach::Ok { .. }),
+                detail,
+                id: m.id,
+            }
+        })
+        .collect())
 }
 
 /// Shows a code and waits in the background for one device to join with it.
@@ -237,7 +279,8 @@ fn main() {
             history,
             copy_history,
             autostart,
-            set_autostart
+            set_autostart,
+            check_devices
         ])
         .setup(|app| {
             // A menu bar app on macOS: no Dock icon.

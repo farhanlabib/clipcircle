@@ -103,6 +103,53 @@ pub fn browse_circle(circle_id: String, self_id: String, peers: PeerMap) -> Resu
     Ok(daemon)
 }
 
+/// A sync service seen on the network.
+#[derive(Debug, Clone)]
+pub struct Announced {
+    pub device: String,
+    pub circle: String,
+    pub addrs: Vec<SocketAddr>,
+}
+
+/// Lists every device announcing the sync service within `wait`, whatever
+/// its circle. For diagnostics; the engine uses [`browse_circle`].
+pub async fn scan(wait: Duration) -> Result<Vec<Announced>> {
+    let daemon = ServiceDaemon::new()?;
+    let events = daemon.browse(SYNC_SERVICE)?;
+    let mut found: HashMap<String, Announced> = HashMap::new();
+    let _ = tokio::time::timeout(wait, async {
+        while let Ok(event) = events.recv_async().await {
+            if let ServiceEvent::ServiceResolved(info) = event {
+                let (Some(device), Some(circle)) = (
+                    info.get_property_val_str("device"),
+                    info.get_property_val_str("circle"),
+                ) else {
+                    continue;
+                };
+                let addrs = dialable_addrs(info.get_addresses().iter().copied(), info.get_port());
+                let entry = found.entry(device.to_owned()).or_insert(Announced {
+                    device: device.to_owned(),
+                    circle: circle.to_owned(),
+                    addrs: Vec::new(),
+                });
+                for a in addrs {
+                    if !entry.addrs.contains(&a) {
+                        entry.addrs.push(a);
+                    }
+                }
+            }
+        }
+    })
+    .await;
+    let _ = daemon.shutdown();
+    let mut out: Vec<Announced> = found.into_values().collect();
+    for a in &mut out {
+        a.addrs.sort_by_key(|s| (s.is_ipv6(), *s));
+    }
+    out.sort_by(|a, b| a.device.cmp(&b.device));
+    Ok(out)
+}
+
 /// Waits for a device that is currently showing a pairing code.
 pub async fn find_pairing_host(timeout: Duration) -> Result<SocketAddr> {
     let daemon = ServiceDaemon::new()?;

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use clip_core::clipboard::{Clip, Clipboard, FileData, MemoryClipboard};
-use clip_core::sync::Engine;
+use clip_core::sync::{Engine, Reach};
 use clip_core::{pairing, State};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -260,10 +260,46 @@ async fn paused_device_neither_sends_nor_receives() {
     let (engine_b, addr_b) = serve(b.clone(), clip_b.clone()).await;
     engine_b.set_paused(true);
     let engine_a = Engine::new(a, None, Box::new(MemoryClipboard::default()));
-    assert!(engine_a
-        .push(addr_b, &Clip::Text("secret".into()))
-        .await
-        .is_err());
+    // b still completes the handshake (so connection checks work while
+    // paused) but drops the clip instead of applying it.
+    let _ = engine_a.push(addr_b, &Clip::Text("secret".into())).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
     let mut clip_b = clip_b;
     assert_eq!(clip_b.get(), None);
+}
+
+#[tokio::test]
+async fn connection_check_reports_each_member() {
+    let mut a = State::generate("mac").unwrap();
+    let mut b = State::generate("windows").unwrap();
+    let mut c = State::generate("linux").unwrap();
+    let mut d = State::generate("old-laptop").unwrap();
+    pair(&mut a, &mut b, "666666", "666666").await.unwrap();
+    pair(&mut a, &mut c, "777777", "777777").await.unwrap();
+    pair(&mut a, &mut d, "888888", "888888").await.unwrap();
+
+    let (engine_b, addr_b) = serve(b.clone(), MemoryClipboard::default()).await;
+    // A paused device still answers checks.
+    engine_b.set_paused(true);
+    // Nothing listens here.
+    let closed = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap()
+    };
+
+    let engine_a = Engine::new(a, None, Box::new(MemoryClipboard::default()));
+    {
+        let mut peers = engine_a.peers.lock().unwrap();
+        peers.insert(b.device.id.clone(), vec![addr_b]);
+        peers.insert(c.device.id.clone(), vec![closed]);
+    }
+    let got = engine_a.check_members().await;
+    let by_name = |n: &str| got.iter().find(|m| m.name == n).unwrap().reach.clone();
+    assert!(matches!(by_name("windows"), Reach::Ok { addr, .. } if addr == addr_b));
+    assert!(matches!(by_name("linux"), Reach::Failed { .. }));
+    assert_eq!(by_name("old-laptop"), Reach::NotFound);
+    assert!(by_name("old-laptop").hint().is_some());
+
+    let (name, _) = engine_a.ping(addr_b).await.unwrap();
+    assert_eq!(name, "windows");
 }

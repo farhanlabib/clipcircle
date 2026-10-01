@@ -30,8 +30,21 @@ async function refreshStatus() {
     }
     for (const m of s.members) {
       const li = document.createElement("li");
-      const name = document.createElement("span");
-      name.textContent = m.name;
+      const name = document.createElement("div");
+      name.className = "device";
+      const title = document.createElement("span");
+      const dot = document.createElement("i");
+      dot.className = m.online ? "dot online" : "dot";
+      dot.title = m.online ? "On this network" : "Not seen on this network";
+      title.append(dot, m.name);
+      name.append(title);
+      const check = checks[m.id];
+      if (check) {
+        const detail = document.createElement("span");
+        detail.className = check.ok ? "detail" : "detail bad";
+        detail.textContent = check.detail;
+        name.append(detail);
+      }
       const remove = document.createElement("button");
       remove.className = "link";
       remove.textContent = "Remove";
@@ -49,6 +62,22 @@ async function refreshStatus() {
     showError(e);
   }
 }
+
+/** Results of the last "Check connections", by device id. */
+let checks = {};
+
+$("check-btn").onclick = async () => {
+  const btn = $("check-btn");
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  try {
+    const results = await invoke("check_devices");
+    checks = Object.fromEntries(results.map((r) => [r.id, r]));
+  } catch (e) { showError(e); }
+  btn.disabled = false;
+  btn.textContent = "Check connections";
+  refreshStatus();
+};
 
 async function refreshHistory() {
   let entries = [];

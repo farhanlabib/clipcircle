@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use tokio::net::{TcpListener, TcpStream};
@@ -23,6 +23,53 @@ use crate::State;
 
 pub const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// What a connection check found for one circle member.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reach {
+    /// Answered over an encrypted connection and accepted us as a member.
+    Ok { addr: SocketAddr, millis: u64 },
+    /// Not announced on this network.
+    NotFound,
+    /// Announced, but no address worked; this is the last error.
+    Failed { error: String },
+}
+
+impl Reach {
+    /// A short, plain-language next step for a failed check.
+    pub fn hint(&self) -> Option<&'static str> {
+        match self {
+            Reach::Ok { .. } => None,
+            Reach::NotFound => Some(
+                "Not seen on this network. Check that the app is running there and that \
+                 both devices are on the same Wi-Fi. Some routers block device discovery \
+                 (client or AP isolation).",
+            ),
+            Reach::Failed { error } if error.contains("timed out") => Some(
+                "The connection timed out. A firewall on that device may be \
+                 blocking the sync port.",
+            ),
+            Reach::Failed { error } if error.contains("refused") => {
+                Some("Nothing answered on the sync port. The app there may not be running.")
+            }
+            Reach::Failed { error }
+                if error.contains("removed this one") || error.contains("not in our circle") =>
+            {
+                Some("That device no longer accepts this one. Pair the two again.")
+            }
+            Reach::Failed { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MemberReach {
+    pub id: String,
+    pub name: String,
+    /// Addresses it was announced at.
+    pub addrs: Vec<SocketAddr>,
+    pub reach: Reach,
+}
 
 #[derive(Clone)]
 pub struct Engine {
@@ -182,29 +229,96 @@ impl Engine {
     }
 
     async fn push_wire(&self, addr: SocketAddr, wire: &WireClip) -> Result<()> {
+        let (mut chan, _) = self.connect(addr).await?;
+        chan.send_json(&Message::Clip { clip: wire.clone() }).await
+    }
+
+    /// Opens a sync connection to `addr`: handshake, membership check and
+    /// Hello both ways. Returns the channel and the peer's name.
+    async fn connect(&self, addr: SocketAddr) -> Result<(SecureStream, String)> {
         let stream = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr))
             .await
             .context("connect timed out")??;
         let key = self.state.lock().await.private_key_bytes()?;
         let mut chan = transport::sync_initiator(stream, &key).await?;
-        self.check_member(&chan).await?;
+        let name = self.check_member(&chan).await?;
         self.send_hello(&mut chan).await?;
-        self.recv_hello(&mut chan).await?;
-        chan.send_json(&Message::Clip { clip: wire.clone() }).await
+        self.recv_hello(&mut chan)
+            .await
+            .context("no hello back (has that device removed this one?)")?;
+        Ok((chan, name))
+    }
+
+    /// Checks that the device at `addr` is a circle member that accepts us.
+    /// Returns its name and how long the check took.
+    pub async fn ping(&self, addr: SocketAddr) -> Result<(String, Duration)> {
+        let start = Instant::now();
+        let (mut chan, name) = self.connect(addr).await?;
+        chan.send_json(&Message::Ping).await?;
+        Ok((name, start.elapsed()))
+    }
+
+    /// Checks every circle member at the addresses discovery has for it.
+    pub async fn check_members(&self) -> Vec<MemberReach> {
+        let members = self.state.lock().await.members.clone();
+        let peers = self.peers.lock().unwrap().clone();
+        let mut checks = tokio::task::JoinSet::new();
+        for (index, member) in members.into_iter().enumerate() {
+            let addrs = peers.get(&member.id).cloned().unwrap_or_default();
+            let engine = self.clone();
+            checks.spawn(async move {
+                let reach = if addrs.is_empty() {
+                    Reach::NotFound
+                } else {
+                    let mut last = String::new();
+                    let mut found = None;
+                    for &addr in &addrs {
+                        match engine.ping(addr).await {
+                            Ok((_, took)) => {
+                                found = Some(Reach::Ok {
+                                    addr,
+                                    millis: took.as_millis() as u64,
+                                });
+                                break;
+                            }
+                            Err(e) => last = format!("{e:#}"),
+                        }
+                    }
+                    found.unwrap_or(Reach::Failed { error: last })
+                };
+                (
+                    index,
+                    MemberReach {
+                        id: member.id,
+                        name: member.name,
+                        addrs,
+                        reach,
+                    },
+                )
+            });
+        }
+        let mut out: Vec<(usize, MemberReach)> = checks.join_all().await;
+        out.sort_by_key(|(i, _)| *i);
+        out.into_iter().map(|(_, r)| r).collect()
     }
 
     async fn handle_incoming(&self, stream: TcpStream) -> Result<()> {
-        if self.is_paused() {
-            bail!("syncing is paused");
-        }
         let key = self.state.lock().await.private_key_bytes()?;
         let mut chan = transport::sync_responder(stream, &key).await?;
         let from = self.check_member(&chan).await?;
         self.recv_hello(&mut chan).await?;
         self.send_hello(&mut chan).await?;
-        let Message::Clip { clip } = chan.recv_json().await? else {
-            bail!("expected clip message");
+        let clip = match chan.recv_json().await? {
+            Message::Clip { clip } => clip,
+            Message::Ping => {
+                tracing::debug!(from, "connection check");
+                return Ok(());
+            }
+            _ => bail!("expected clip message"),
         };
+        if self.is_paused() {
+            bail!("syncing is paused");
+        }
         let clip = tokio::task::spawn_blocking(move || Clip::from_wire(clip)).await??;
         tracing::info!(from, bytes = clip.len(), "received clip");
         self.record(&from, &clip);

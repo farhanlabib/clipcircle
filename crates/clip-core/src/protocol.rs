@@ -24,4 +24,6 @@ pub enum Message {
     },
     /// Sync: new clipboard contents.
     Clip { clip: WireClip },
+    /// Sync: a connection check; sent instead of a clip and needs no answer.
+    Ping,
 }

@@ -6,10 +6,11 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use clip_core::clipboard::{Clip, Clipboard, SystemClipboard};
+use clip_core::clipboard::{Clip, Clipboard, MemoryClipboard, SystemClipboard};
 use clip_core::discovery::{self, PAIR_SERVICE, SYNC_SERVICE};
 use clip_core::history::{Content, History};
-use clip_core::sync::Engine;
+use clip_core::service::DEFAULT_PORT;
+use clip_core::sync::{Engine, Reach};
 use clip_core::{pairing, State};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -49,6 +50,17 @@ enum Command {
         /// Don't keep a history of copied text on this device.
         #[arg(long)]
         no_history: bool,
+    },
+    /// Check whether this device can reach the others in its circle, and
+    /// suggest what to fix if not.
+    Doctor {
+        /// How long to look for devices on the network, in seconds.
+        #[arg(long, default_value_t = 5)]
+        wait: u64,
+        /// Also check a device at this address (IP or IP:port), for networks
+        /// that block discovery.
+        #[arg(long)]
+        addr: Vec<String>,
     },
     /// Show recently copied and received clips, newest first.
     History {
@@ -140,6 +152,7 @@ async fn main() -> Result<()> {
                 print_history(&history, limit);
             }
         }
+        Command::Doctor { wait, addr } => doctor(state, wait, addr).await?,
         Command::Run { port, no_history } => {
             let listener = TcpListener::bind(("0.0.0.0", port)).await?;
             let _ad = discovery::advertise(
@@ -167,6 +180,98 @@ async fn main() -> Result<()> {
                 r = engine.serve(listener) => r?,
                 r = engine.watch() => r?,
                 _ = tokio::signal::ctrl_c() => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn doctor(state: State, wait: u64, extra: Vec<String>) -> Result<()> {
+    println!("This device: {} ({})", state.device.name, state.device.id);
+    let mut ips: Vec<String> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| !i.is_loopback() && i.ip().is_ipv4())
+        .map(|i| format!("{} ({})", i.ip(), i.name))
+        .collect();
+    ips.sort();
+    if ips.is_empty() {
+        println!("Network: no IPv4 address. Connect to Wi-Fi or Ethernet first.");
+    } else {
+        println!("Network: {}", ips.join(", "));
+    }
+    match TcpListener::bind(("0.0.0.0", DEFAULT_PORT)).await {
+        Ok(_) => println!(
+            "Sync port {DEFAULT_PORT}: free, so nothing is syncing on this device right now \
+             (start `clipd run` or the tray app)."
+        ),
+        Err(_) => {
+            println!("Sync port {DEFAULT_PORT}: in use, so clipd or the tray app is running here.")
+        }
+    }
+    if state.members.is_empty() {
+        println!("No other devices in the circle yet. Run `clipd pair` here and `clipd join <code>` on another device.");
+        return Ok(());
+    }
+
+    println!("Looking for devices on this network for {wait} s…");
+    let seen = discovery::scan(Duration::from_secs(wait)).await?;
+    let engine = Engine::new(state.clone(), None, Box::new(MemoryClipboard::default()));
+    {
+        let mut peers = engine.peers.lock().unwrap();
+        for a in seen.iter().filter(|a| a.circle == state.circle_id) {
+            peers.insert(a.device.clone(), a.addrs.clone());
+        }
+    }
+    let width = state
+        .members
+        .iter()
+        .map(|m| m.name.chars().count())
+        .max()
+        .unwrap_or(0);
+    for m in engine.check_members().await {
+        let what = match &m.reach {
+            Reach::Ok { addr, millis } => format!("reachable at {addr} ({millis} ms)"),
+            Reach::NotFound => "not found on this network".to_owned(),
+            Reach::Failed { error } => {
+                let at: Vec<String> = m.addrs.iter().map(|a| a.to_string()).collect();
+                format!("found at {} but the check failed: {error}", at.join(", "))
+            }
+        };
+        println!("  {:<width$}  {what}", m.name);
+        if let Some(hint) = m.reach.hint() {
+            println!("  {:<width$}  -> {hint}", "");
+        }
+    }
+    let others = seen
+        .iter()
+        .filter(|a| a.circle != state.circle_id && a.device != state.device.id)
+        .count();
+    if others > 0 {
+        println!("Also seen: {others} device(s) in another circle.");
+    }
+
+    for raw in extra {
+        let addr: SocketAddr = match raw.parse() {
+            Ok(a) => a,
+            Err(_) => match raw.parse::<std::net::IpAddr>() {
+                Ok(ip) => SocketAddr::new(ip, DEFAULT_PORT),
+                Err(_) => {
+                    println!("  {raw}: not an IP address or IP:port");
+                    continue;
+                }
+            },
+        };
+        match engine.ping(addr).await {
+            Ok((name, took)) => println!("  {addr}: {name} answered ({} ms)", took.as_millis()),
+            Err(e) => {
+                let reach = Reach::Failed {
+                    error: format!("{e:#}"),
+                };
+                println!("  {addr}: check failed: {e:#}");
+                if let Some(hint) = reach.hint() {
+                    println!("  {addr}: -> {hint}");
+                }
             }
         }
     }
