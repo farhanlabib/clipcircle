@@ -28,9 +28,10 @@ pub fn advertise(
     Ok(daemon)
 }
 
-/// Addresses worth connecting to, IPv4 first. IPv6 link-local addresses are
-/// dropped: mDNS reports them without a scope id, so connecting fails with
-/// "no route to host".
+/// Addresses worth connecting to, most likely to work first: home/office LAN
+/// addresses, then other IPv4, then VPN-style (CGNAT, e.g. Tailscale) and
+/// link-local IPv4, then IPv6. IPv6 link-local addresses are dropped: mDNS
+/// reports them without a scope id, so connecting fails with "no route to host".
 pub fn dialable_addrs(ips: impl IntoIterator<Item = IpAddr>, port: u16) -> Vec<SocketAddr> {
     let mut addrs: Vec<SocketAddr> = ips
         .into_iter()
@@ -40,8 +41,19 @@ pub fn dialable_addrs(ips: impl IntoIterator<Item = IpAddr>, port: u16) -> Vec<S
         })
         .map(|ip| SocketAddr::new(ip, port))
         .collect();
-    addrs.sort_by_key(|a| (a.is_ipv6(), *a));
+    addrs.sort_by_key(|a| (rank(a.ip()), *a));
     addrs
+}
+
+fn rank(ip: IpAddr) -> u8 {
+    match ip {
+        IpAddr::V4(v4) if v4.is_private() => 0,
+        // 100.64.0.0/10: carrier-grade NAT, used by Tailscale and other VPNs.
+        IpAddr::V4(v4) if v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64 => 2,
+        IpAddr::V4(v4) if v4.is_link_local() => 3,
+        IpAddr::V4(_) => 1,
+        IpAddr::V6(_) => 4,
+    }
 }
 
 /// Keeps `peers` filled with devices advertising the given circle.
@@ -98,8 +110,9 @@ pub async fn find_pairing_host(timeout: Duration) -> Result<SocketAddr> {
     let found = tokio::time::timeout(timeout, async {
         while let Ok(event) = events.recv_async().await {
             if let ServiceEvent::ServiceResolved(info) = event {
-                if let Some(ip) = info.get_addresses().iter().find(|ip| ip.is_ipv4()) {
-                    return Some(SocketAddr::new(*ip, info.get_port()));
+                let addrs = dialable_addrs(info.get_addresses().iter().copied(), info.get_port());
+                if let Some(addr) = addrs.into_iter().find(|a| a.is_ipv4()) {
+                    return Some(addr);
                 }
             }
         }
@@ -118,13 +131,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dialable_addrs_drops_link_local_and_puts_ipv4_first() {
-        let ips: Vec<IpAddr> = ["fe80::1", "fd00::5", "192.168.31.67", "fe80::abcd"]
-            .iter()
-            .map(|s| s.parse().unwrap())
-            .collect();
+    fn dialable_addrs_drops_ipv6_link_local_and_puts_lan_first() {
+        let ips: Vec<IpAddr> = [
+            "fe80::1",
+            "fd00::5",
+            "100.75.104.51",
+            "192.168.31.67",
+            "169.254.3.4",
+            "fe80::abcd",
+        ]
+        .iter()
+        .map(|s| s.parse().unwrap())
+        .collect();
         let addrs = dialable_addrs(ips, 47800);
         let got: Vec<String> = addrs.iter().map(|a| a.to_string()).collect();
-        assert_eq!(got, ["192.168.31.67:47800", "[fd00::5]:47800"]);
+        assert_eq!(
+            got,
+            [
+                "192.168.31.67:47800",
+                "100.75.104.51:47800",
+                "169.254.3.4:47800",
+                "[fd00::5]:47800"
+            ]
+        );
     }
 }
