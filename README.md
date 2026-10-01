@@ -95,6 +95,23 @@ CI builds a debug APK on every push (download it from the run's artifacts).
 To build locally you need the Android SDK and NDK, `cargo-ndk`, and Gradle 8.11;
 the steps are the `android` job in `.github/workflows/ci.yml`.
 
+## Checking a change
+
+GitHub Actions (CI and Installers) is turned off for now, so installers and
+the APK are not built automatically; build them locally as described above.
+Before merging, run:
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+scripts/check-android-kotlin.sh  # type-checks the Android app, no SDK needed
+```
+
+On a desktop (or Linux with `xvfb-run`),
+`cargo test -p clip-core --features system-clipboard -- --ignored` also
+checks the real clipboard.
+
 ## How it works
 
 | Piece | Choice |
