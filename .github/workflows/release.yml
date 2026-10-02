@@ -115,7 +115,9 @@ jobs:
           generate --library target/aarch64-linux-android/release/libclip_ffi.so
           --language kotlin --out-dir android/app/src/main/java --no-format
       # Updates only install over an APK signed with the same key, so a
-      # published release must use the release key.
+      # published release must use the release key: a PKCS12 keystore with the
+      # key under the alias "clipcircle", in the ANDROID_KEYSTORE_BASE64 and
+      # ANDROID_KEYSTORE_PASSWORD secrets.
       - name: Set up the signing key
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -133,8 +135,8 @@ jobs:
         working-directory: android
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: clipcircle
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: gradle assembleRelease --no-daemon
       - run: |
           mkdir dist
