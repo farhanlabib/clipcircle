@@ -16,11 +16,13 @@ jobs:
         include:
           - name: macos
             os: macos-latest
+            runner: macos-latest
             targets: aarch64-apple-darwin,x86_64-apple-darwin
             args: --target universal-apple-darwin --bundles app,dmg
             files: target/universal-apple-darwin/release/bundle/dmg/*.dmg
           - name: windows
             os: windows-latest
+            runner: windows-latest
             args: --bundles msi,nsis
             files: |
               target/release/bundle/msi/*.msi
@@ -28,11 +30,12 @@ jobs:
           # 22.04 keeps the AppImage working on older glibc distros too.
           - name: linux
             os: ubuntu-22.04
+            runner: [self-hosted, linux, x64, nas-runner, universal-clipboard-runner]
             args: --bundles deb,appimage
             files: |
               target/release/bundle/deb/*.deb
               target/release/bundle/appimage/*.AppImage
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
