@@ -12,6 +12,7 @@ import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.WindowInsets
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -112,7 +113,8 @@ class MainActivity : Activity() {
     }
 
     private fun join() {
-        val code = joinCode.text.toString().trim()
+        // Codes are shown as "123 456"; accept them typed or pasted either way.
+        val code = joinCode.text.toString().filter { it.isDigit() }
         if (!Regex("\\d{6}").matches(code)) {
             joinStatus.text = "The code has 6 digits."
             return
@@ -174,7 +176,7 @@ class MainActivity : Activity() {
         column.addView(text("Type the 6-digit code shown on a device in the circle.", muted = true))
         val joinRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         joinCode = EditText(this).apply {
-            hint = "123456"
+            hint = "6-digit code"
             inputType = InputType.TYPE_CLASS_NUMBER
         }
         joinRow.addView(joinCode, LinearLayout.LayoutParams(0, -2, 1f))
@@ -186,7 +188,17 @@ class MainActivity : Activity() {
         joinStatus = text("", muted = true)
         column.addView(joinStatus)
 
-        return ScrollView(this).apply { addView(column) }
+        return ScrollView(this).apply {
+            addView(column)
+            // Android 15 draws apps under the status and navigation bars.
+            if (Build.VERSION.SDK_INT >= 30) {
+                setOnApplyWindowInsetsListener { view, insets ->
+                    val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime())
+                    view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                    insets
+                }
+            }
+        }
     }
 
     private fun section(label: String) = text(label.uppercase()).apply {

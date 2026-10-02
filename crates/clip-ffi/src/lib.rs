@@ -104,7 +104,8 @@ pub struct Node {
 
 #[uniffi::export]
 impl Node {
-    /// `data_dir` is app-private storage; `device_name` is used the first time only.
+    /// `data_dir` is app-private storage. `device_name` is what the circle
+    /// will call this device; it can change until another device is paired.
     #[uniffi::constructor]
     pub fn new(
         data_dir: String,
@@ -120,6 +121,14 @@ impl Node {
         let state_path = data_dir.join("state.json");
         if !state_path.exists() {
             State::generate(device_name)?.save(&state_path)?;
+        } else {
+            // Before any pairing nobody knows the old name, so follow the
+            // phone's name (e.g. after it was renamed in settings).
+            let mut state = State::load_or_create(&state_path)?;
+            if state.members.is_empty() && state.device.name != device_name {
+                state.device.name = device_name;
+                state.save(&state_path)?;
+            }
         }
         Ok(Arc::new(Self {
             runtime,
@@ -298,5 +307,38 @@ mod tests {
         assert_eq!(clean_file_name("a/b\\c:d.txt"), "a_b_c_d.txt");
         assert_eq!(clean_file_name(".."), "file");
         assert_eq!(clean_file_name("  "), "file");
+    }
+
+    struct Quiet;
+    impl ClipListener for Quiet {
+        fn on_clip(&self, _: String) {}
+        fn on_image(&self, _: Vec<u8>) {}
+        fn on_files(&self, _: Vec<SharedFile>) {}
+        fn on_paired(&self, _: String) {}
+        fn on_pairing_failed(&self, _: String) {}
+    }
+
+    #[test]
+    fn device_name_follows_the_phone_until_paired() {
+        let dir = std::env::temp_dir().join(format!("clip-ffi-name-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let data_dir = dir.to_string_lossy().into_owned();
+        let name = |node: Arc<Node>| node.device_name().unwrap();
+
+        let first = Node::new(data_dir.clone(), "A001".into(), Arc::new(Quiet)).unwrap();
+        assert_eq!(name(first), "A001");
+        let renamed =
+            Node::new(data_dir.clone(), "Labib's Nothing".into(), Arc::new(Quiet)).unwrap();
+        assert_eq!(name(renamed), "Labib's Nothing");
+
+        // Once paired, the name the circle knows stays.
+        let path = dir.join("state.json");
+        let mut state = State::load_or_create(&path).unwrap();
+        state.merge_members(&[State::generate("mac").unwrap().device]);
+        state.save(&path).unwrap();
+        let later = Node::new(data_dir, "Another name".into(), Arc::new(Quiet)).unwrap();
+        assert_eq!(name(later), "Labib's Nothing");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

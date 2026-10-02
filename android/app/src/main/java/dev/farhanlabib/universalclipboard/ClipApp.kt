@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
 import java.util.concurrent.Executors
 import uniffi.clip_ffi.ClipListener
@@ -62,8 +63,14 @@ class ClipApp : Application() {
                 main.post { onPairingResult?.invoke(false, message) }
             }
         }
-        node = Node(filesDir.absolutePath, Build.MODEL ?: "Android", listener)
+        node = Node(filesDir.absolutePath, deviceName(), listener)
     }
+
+    /** The name set in Settings > About phone, else maker and model. */
+    private fun deviceName(): String =
+        Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: listOf(Build.MANUFACTURER, Build.MODEL).filterNot { it.isNullOrBlank() }.joinToString(" ")
+                .ifEmpty { "Android" }
 
     /** Runs [work] on the worker, then [done] on the main thread with its result. */
     fun <T> background(work: () -> T, done: (Result<T>) -> Unit) {
