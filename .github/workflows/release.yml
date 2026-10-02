@@ -1,0 +1,170 @@
+name: Release
+
+# Builds the installers for every platform. Pushing a tag like v0.2.0 (it must
+# match the version in Cargo.toml) publishes them as a GitHub release. Running
+# the workflow by hand only builds them; download them from the run.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the version in Cargo.toml ($version)"
+            exit 1
+          fi
+
+  desktop:
+    name: desktop (${{ matrix.name }})
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-latest
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin --bundles app,dmg
+            bundle: target/universal-apple-darwin/release/bundle
+          - name: windows
+            os: windows-latest
+            args: --bundles msi,nsis
+            bundle: target/release/bundle
+          # 22.04 keeps the AppImage working on older glibc distros too.
+          - name: linux
+            os: ubuntu-22.04
+            args: --bundles deb,appimage
+            bundle: target/release/bundle
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: Install Linux libraries for the tray app
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev patchelf
+      - name: Build the installers
+        working-directory: crates/clip-tray
+        run: npx --yes @tauri-apps/cli@2 build --ci ${{ matrix.args }}
+      # Names without the version, so README links to
+      # releases/latest/download/<name> always get the newest one.
+      - name: Name the installers
+        shell: bash
+        run: |
+          b=${{ matrix.bundle }}
+          mkdir dist
+          case ${{ matrix.name }} in
+            macos)
+              cp "$b"/dmg/*.dmg dist/ClipCircle-macos.dmg ;;
+            windows)
+              cp "$b"/nsis/*.exe dist/ClipCircle-windows-setup.exe
+              cp "$b"/msi/*.msi dist/ClipCircle-windows.msi ;;
+            linux)
+              cp "$b"/deb/*.deb dist/ClipCircle-linux-amd64.deb
+              cp "$b"/appimage/*.AppImage dist/ClipCircle-linux-amd64.AppImage ;;
+          esac
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clipcircle-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  android:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - run: cargo install cargo-ndk --locked
+      # cargo-ndk finds the runner's NDK through ANDROID_NDK_ROOT.
+      - name: Build the Rust library for Android
+        run: cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o android/app/src/main/jniLibs build -p clip-ffi --release
+      - name: Generate Kotlin bindings
+        run: >
+          cargo run -p clip-ffi --features bindgen --bin uniffi-bindgen --
+          generate --library target/aarch64-linux-android/release/libclip_ffi.so
+          --language kotlin --out-dir android/app/src/main/java --no-format
+      # Updates only install over an APK signed with the same key, so a
+      # published release must use the release key.
+      - name: Set up the signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "::error::The ANDROID_KEYSTORE_BASE64 secret is not set, and a release APK needs the release key"
+            exit 1
+          else
+            echo "::warning::No release key, so this APK is signed with a debug key"
+          fi
+      - name: Build the APK
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon
+      - run: |
+          mkdir dist
+          cp android/app/build/outputs/apk/release/app-release.apk dist/ClipCircle-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clipcircle-android
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [version, desktop, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          prerelease=
+          case "$VERSION" in *-*) prerelease=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* $prerelease \
+            --title "ClipCircle $VERSION" \
+            --notes-file .github/release-notes.md --generate-notes

@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ClipCircle",
-  "version": "0.1.0",
   "identifier": "dev.farhanlabib.clipcircle",
   "build": {
     "frontendDist": "ui"
@@ -35,7 +34,8 @@
     "category": "Utility",
     "shortDescription": "Copy on one device, paste on another",
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
     }
   }
 }

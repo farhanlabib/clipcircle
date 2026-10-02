@@ -1,0 +1,24 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: devices
+    attributes:
+      label: Devices
+      description: The systems involved and the ClipCircle version, for example "macOS 15 → Android 14, ClipCircle 0.1.0".
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Connection check
+      description: If clips don't arrive, paste the output of Check connections in the app or `clipd doctor`.
+      render: text

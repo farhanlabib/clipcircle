@@ -1,1 +1,5 @@
 target/
+.DS_Store
+# Android signing keys never belong in the repo.
+*.jks
+*.keystore

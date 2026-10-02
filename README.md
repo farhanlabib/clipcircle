@@ -1,117 +1,62 @@
-# Universal Clipboard
+# ClipCircle
 
-Copy on one device, paste on another. Add your devices to a **circle**; any
-circle devices on the same network share their clipboard, end-to-end encrypted,
-with no server or account.
+**Copy on one device, paste on another.** Put your computers and phone in a
+**circle**, and whatever you copy on one is ready to paste on the others while
+they're on the same network. Text, images and files, end-to-end encrypted,
+with no server and no account.
 
-## Status
+It works like Apple's Universal Clipboard, but across macOS, Windows, Linux
+and Android.
 
-Text, image and file sync between desktop devices (macOS, Windows, Linux),
-with the `clipd` CLI or the tray app, plus an Android app.
-Devices can be removed from a circle, and recent clips are kept in a local
-history. iOS will need
-the app to be opened (or a Share/Shortcut action) to send, because iOS does not
-let apps read the clipboard in the background.
+## Download
 
-## Try it
-
-```sh
-cargo build --release
-# Device A
-clipd pair            # prints a 6-digit code
-# Device B (same Wi-Fi)
-clipd join 123456
-# Both devices
-clipd run
-```
-
-Copy text, an image or files on one device and paste on the other. Files
-(not folders) copied in Finder, Explorer or a Linux file manager are sent,
-up to 4 GiB at a time. They stream from disk to disk, so size doesn't cost
-memory. On the other device they are saved under the temp folder (the last
-three batches are kept) and pasting in the file manager copies them where you want.
-If you copy something else before big files finish arriving, your copy stays. `clipd devices`
-lists the circle; `clipd remove <name or id>` takes a device out of it.
-`clipd history` lists the last clips copied or received while `clipd run` was
-running (`--copy N` puts one back, `--clear` deletes it, `run --no-history`
-turns it off). Only text is kept, at most 50 entries, in a file only you can read. Use `--state <file>` to run more than one device on one machine.
-
-If a device doesn't get clips, run `clipd doctor`. It lists this device's
-network addresses, whether something is syncing here, and for each device in
-the circle whether it was found on the network and answered, with a hint when
-not (firewall, router blocking discovery, app not running, removed). On
-networks that block discovery, `clipd doctor --addr 192.168.1.20` checks a
-device directly. If this device syncs on another port (`run --port`), pass
-the same `--port` to `doctor`. The tray app shows a green dot next to devices seen on the
-network and has a **Check connections** button that runs the same check.
-
-## Tray app
-
-`crates/clip-tray` is a menu bar (macOS) / system tray (Windows, Linux) app
-built with Tauri. It runs syncing in the background and has a small window to
-add a device (shows a pairing code), join a circle (type a code), remove
-devices, pause syncing, and click a recent clip to copy it again. Turn on
-**Start at login** (in the window or the tray menu) to have it start with
-your computer; it is off until you turn it on.
-
-```sh
-cargo run -p clip-tray --release
-```
-
-It uses the same state file as `clipd` (`CLIPD_STATE` overrides the path), so
-don't run both at once. On Linux it needs the WebKitGTK and appindicator
-libraries; see `.github/workflows/ci.yml` for the package list.
-
-### Installers
-
-The **Installers** workflow builds the tray app for every push to `main`:
-open the latest run under Actions and download the artifact for your system.
-
-| Artifact | Contains |
+| System | Installer |
 |---|---|
-| `universal-clipboard-macos` | `.dmg` (Apple silicon and Intel) |
-| `universal-clipboard-windows` | `.msi` and setup `.exe` |
-| `universal-clipboard-linux` | `.deb` and `.AppImage` |
+| macOS 11+ (Apple silicon and Intel) | [ClipCircle-macos.dmg](https://github.com/farhanlabib/clipcircle/releases/latest/download/ClipCircle-macos.dmg) |
+| Windows 10/11 | [ClipCircle-windows-setup.exe](https://github.com/farhanlabib/clipcircle/releases/latest/download/ClipCircle-windows-setup.exe) ([.msi](https://github.com/farhanlabib/clipcircle/releases/latest/download/ClipCircle-windows.msi)) |
+| Android 10+ | [ClipCircle-android.apk](https://github.com/farhanlabib/clipcircle/releases/latest/download/ClipCircle-android.apk) |
+| Linux (x86-64) | [AppImage](https://github.com/farhanlabib/clipcircle/releases/latest/download/ClipCircle-linux-amd64.AppImage) or [.deb](https://github.com/farhanlabib/clipcircle/releases/latest/download/ClipCircle-linux-amd64.deb) |
 
-The builds are not signed yet. On macOS, right-click the app and choose
-**Open** the first time (or run `xattr -dr com.apple.quarantine
-"/Applications/Universal Clipboard.app"`). On Windows, click **More info**,
-then **Run anyway** in the SmartScreen prompt.
+All versions are on the [Releases](https://github.com/farhanlabib/clipcircle/releases) page.
 
-To build one locally: `cd crates/clip-tray && npx @tauri-apps/cli@2 build`.
+The desktop builds are not signed with a paid certificate yet, so the first
+launch needs one extra click:
 
-## Android app
+- **macOS:** open the app once, then go to System Settings → Privacy &
+  Security and click **Open Anyway**.
+- **Windows:** in the SmartScreen prompt click **More info**, then **Run anyway**.
+- **Android:** allow your browser or file manager to install unknown apps when asked.
 
-`android/` is a small Android app (Android 10+) on top of `crates/clip-ffi`,
-the UniFFI bindings to the same Rust core. It keeps syncing in a foreground
-service, so text and images from your other devices land on the phone's
-clipboard. Files copied on a computer are saved to Downloads/Universal
-Clipboard, put on the clipboard, and announced in a notification. Android only
-lets the app in front read the clipboard, so to send from the phone tap **Send
-clipboard** in the app or the notification, or share text, an image or files
-to **Send to my devices**. Photos larger than 4096 pixels on
-a side are scaled down before sending.
+## Getting started
 
-CI builds a debug APK on every push (download it from the run's artifacts).
-To build locally you need the Android SDK and NDK, `cargo-ndk`, and Gradle 8.11;
-the steps are the `android` job in `.github/workflows/ci.yml`.
+1. Install ClipCircle on two devices on the same Wi-Fi or LAN.
+2. On the first one, choose **Add a device**. It shows a 6-digit code.
+3. On the second one, choose **Join a circle** and type the code.
+4. Copy something on one device and paste it on the other.
 
-## Checking a change
+Add more devices the same way, from any device already in the circle. On a
+computer ClipCircle lives in the menu bar (macOS) or system tray (Windows,
+Linux); turn on **Start at login** to keep it running.
 
-GitHub Actions (CI and Installers) is turned off for now, so installers and
-the APK are not built automatically; build them locally as described above.
-Before merging, run:
+## Features
 
-```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-scripts/check-android-kotlin.sh  # type-checks the Android app, no SDK needed
-```
+- **Text, images and files.** Files (not folders) copied in Finder, Explorer
+  or a Linux file manager are sent, up to 4 GiB at a time, streamed from disk
+  to disk. Paste them in the file manager on the other device.
+- **Android.** Text and images from your computers land on the phone's
+  clipboard; files go to Downloads/ClipCircle. Android only lets the app in
+  front read the clipboard, so to send from the phone tap **Send clipboard**
+  (in the app or its notification), or share text, images or files to
+  **Send to my devices**.
+- **Private by design.** Devices pair with a short code and then talk only to
+  each other, encrypted. Nothing goes through a server.
+- **Recent clips.** The last 50 text clips are kept locally; click one to copy
+  it again.
+- **Connection check.** When a device doesn't get clips, **Check connections**
+  (or `clipd doctor`) says what's wrong: a firewall, a router that blocks
+  discovery, the app not running.
 
-On a desktop (or Linux with `xvfb-run`),
-`cargo test -p clip-core --features system-clipboard -- --ignored` also
-checks the real clipboard.
+iOS isn't supported: iOS doesn't let apps read the clipboard in the background.
 
 ## How it works
 
@@ -126,15 +71,71 @@ checks the real clipboard.
 
 Code layout:
 
-- `crates/clip-core`: everything platform-independent (`state`, `pairing`, `transport`, `discovery`, `sync`).
-- `crates/clipd`: the CLI daemon.
-- `crates/clip-tray`: the tray app (Tauri; the window is plain HTML/JS in `ui/`).
-- `crates/clip-ffi` and `android/`: the Android app.
+- `crates/clip-core`: everything platform-independent (state, pairing,
+  transport, discovery, sync, file transfer).
+- `crates/clipd`: the command-line daemon.
+- `crates/clip-tray`: the desktop app (Tauri; the window is plain HTML/JS in `ui/`).
+- `crates/clip-ffi` and `android/`: the Android app, on UniFFI bindings to the
+  same Rust core.
+
+## Command line
+
+`clipd` does everything the desktop app does, for servers or scripting:
+
+```sh
+cargo build --release -p clipd
+clipd pair            # device A: prints a 6-digit code
+clipd join 123456     # device B, same network
+clipd run             # both: sync until stopped
+```
+
+- `clipd devices` lists the circle; `clipd remove <name or id>` takes a device out.
+- `clipd history` lists recent clips (`--copy N` puts one back, `--clear`
+  deletes them, `run --no-history` turns history off).
+- `clipd doctor` checks the network and every device in the circle.
+  `--addr 192.168.1.20` checks one device directly on networks that block
+  discovery; pass the same `--port` you gave `run`.
+- `--state <file>` runs more than one device on one machine.
+
+Received files are saved under the temp folder (the last three batches are
+kept). The desktop app and `clipd` share their state file (`CLIPD_STATE`
+overrides the path), so don't run both at once.
+
+## Building from source
+
+You need [Rust](https://rustup.rs) (stable).
+
+```sh
+cargo run -p clip-tray --release                     # the desktop app
+cd crates/clip-tray && npx @tauri-apps/cli@2 build   # its installer
+```
+
+On Linux the desktop app needs the WebKitGTK and appindicator libraries; see
+`.github/workflows/ci.yml` for the package list.
+
+The Android app needs the Android SDK and NDK, `cargo-ndk` and Gradle 8.11;
+the steps are the `android` job in `.github/workflows/release.yml`.
+
+## Contributing
+
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Known gaps
 
-- On macOS an unsigned `clipd` build asks for Keychain access again after every rebuild; choose "Always Allow".
+- On macOS an unsigned `clipd` build asks for Keychain access again after
+  every rebuild; choose "Always Allow".
+- A removal only spreads when a member that knows about it syncs with the
+  others, and a removed device that pairs again through a member that hasn't
+  heard yet can be removed again by gossip.
+- Images are read from the clipboard on every poll, which costs more than text
+  for big images.
+- A big file goes to each device separately, and there is no progress shown yet.
 
-- A removal only spreads when a member that knows about it syncs with the others, and a removed device that pairs again through a member that hasn't heard yet can be removed again by gossip.
-- Images are read from the clipboard on every poll, which costs more than text for big images.
-- One connection per push, so a big file goes to each device separately and there is no progress shown yet.
+## License
+
+Licensed under either of [Apache License 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT), at your option.
+
+Unless you explicitly state otherwise, any contribution you intentionally
+submit for inclusion in this project, as defined in the Apache-2.0 license,
+shall be dual licensed as above, without any additional terms or conditions.
