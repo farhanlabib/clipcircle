@@ -1,4 +1,4 @@
-package dev.farhanlabib.universalclipboard
+package dev.farhanlabib.clipcircle
 
 import android.Manifest
 import android.app.Activity
@@ -141,7 +141,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        title = text("Universal Clipboard").apply {
+        title = text("ClipCircle").apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
             typeface = Typeface.DEFAULT_BOLD
         }
@@ -152,7 +152,7 @@ class MainActivity : Activity() {
         column.addView(text("Clips copied on your other devices land on this phone's clipboard.", muted = true))
 
         column.addView(section("Send from this phone"))
-        column.addView(text("Copy something, then tap below, use the notification's Send clipboard button, or share text to Universal Clipboard.", muted = true))
+        column.addView(text("Copy something, then tap below, use the notification's Send clipboard button, or share text to ClipCircle.", muted = true))
         column.addView(Button(this).apply {
             text = "Send clipboard now"
             setOnClickListener { startActivity(Intent(this@MainActivity, SendActivity::class.java)) }

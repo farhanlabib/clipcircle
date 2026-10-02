@@ -1,4 +1,4 @@
-package dev.farhanlabib.universalclipboard
+package dev.farhanlabib.clipcircle
 
 import android.app.DownloadManager
 import android.app.Notification
@@ -20,12 +20,12 @@ import uniffi.clip_ffi.SharedFile
 
 /** Files copied on another device: saved to Downloads, put on the clipboard. */
 object ReceivedFiles {
-    private const val FOLDER = "Universal Clipboard"
+    private const val FOLDER = "ClipCircle"
     private const val CHANNEL = "files"
     private const val NOTIFICATION_ID = 2
 
     /**
-     * Moves [files] (received into app storage) to Downloads/Universal Clipboard
+     * Moves [files] (received into app storage) to Downloads/ClipCircle
      * and returns their URIs.
      */
     fun save(context: Context, files: List<SharedFile>): List<Uri> {

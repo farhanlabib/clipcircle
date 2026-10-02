@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "dev.farhanlabib.universalclipboard"
+    namespace = "dev.farhanlabib.clipcircle"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "dev.farhanlabib.universalclipboard"
+        applicationId = "dev.farhanlabib.clipcircle"
         minSdk = 29
         targetSdk = 35
         versionCode = 1

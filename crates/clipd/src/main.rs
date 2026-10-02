@@ -1,4 +1,4 @@
-//! `clipd`: command-line daemon for the universal clipboard (milestone 1).
+//! `clipd`: command-line daemon for ClipCircle (milestone 1).
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

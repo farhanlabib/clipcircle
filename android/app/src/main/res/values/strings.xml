@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Universal Clipboard</string>
+    <string name="app_name">ClipCircle</string>
     <string name="send_to_circle">Send to my devices</string>
     <string name="channel_name">Syncing</string>
     <string name="notification_text">Clips from your devices land on this phone\'s clipboard.</string>

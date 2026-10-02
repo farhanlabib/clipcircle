@@ -3,10 +3,10 @@ name = "clip-tray"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Menu bar / system tray app for the universal clipboard"
+description = "Menu bar / system tray app for ClipCircle"
 
 [[bin]]
-name = "universal-clipboard"
+name = "clipcircle"
 path = "src/main.rs"
 
 [build-dependencies]

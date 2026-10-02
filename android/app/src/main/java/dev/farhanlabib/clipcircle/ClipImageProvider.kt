@@ -1,4 +1,4 @@
-package dev.farhanlabib.universalclipboard
+package dev.farhanlabib.clipcircle
 
 import android.content.ContentProvider
 import android.content.ContentValues

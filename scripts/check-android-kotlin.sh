@@ -5,11 +5,11 @@
 # Kotlin errors, not resource, manifest or packaging problems.
 #
 # Needs a JDK (17+), curl and cargo. Downloads about 250 MB of jars from Maven
-# Central once, into $CACHE (default ~/.cache/universal-clipboard-ktc).
+# Central once, into $CACHE (default ~/.cache/clipcircle-ktc).
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-CACHE=${CACHE:-$HOME/.cache/universal-clipboard-ktc}
+CACHE=${CACHE:-$HOME/.cache/clipcircle-ktc}
 TARGET=${CARGO_TARGET_DIR:-$ROOT/target}
 MAVEN=https://repo1.maven.org/maven2
 KOTLIN=2.0.21 # keep in step with android/build.gradle.kts
@@ -57,7 +57,7 @@ cargo run -q -p clip-ffi --features bindgen --bin uniffi-bindgen -- \
 # A stand-in for the R class the Android build would generate.
 res=android/app/src/main/res
 {
-  echo "package dev.farhanlabib.universalclipboard"
+  echo "package dev.farhanlabib.clipcircle"
   echo "object R {"
   echo "  object string {"
   grep -o '<string name="[a-z_]*"' "$res/values/strings.xml" | sed 's/.*name="\(.*\)"/    const val \1 = 0/'

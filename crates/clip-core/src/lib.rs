@@ -1,4 +1,4 @@
-//! Core of the universal clipboard: circle membership, pairing, discovery,
+//! Core of ClipCircle: circle membership, pairing, discovery,
 //! encrypted transport and the clipboard sync engine. Every platform app
 //! (desktop via Tauri, Android via UniFFI) is meant to sit on top of this.
 

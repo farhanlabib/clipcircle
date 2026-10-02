@@ -74,7 +74,7 @@ impl State {
 
     pub fn default_path() -> Result<PathBuf> {
         let dir = dirs::config_dir().context("no config directory on this platform")?;
-        Ok(dir.join("universal-clipboard").join("state.json"))
+        Ok(dir.join("clipcircle").join("state.json"))
     }
 
     /// Loads the state at `path`, creating a new device there if none exists.

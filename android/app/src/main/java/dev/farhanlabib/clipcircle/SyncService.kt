@@ -1,4 +1,4 @@
-package dev.farhanlabib.universalclipboard
+package dev.farhanlabib.clipcircle
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -29,7 +29,7 @@ class SyncService : Service() {
         )
         if (multicastLock == null) {
             val wifi = applicationContext.getSystemService(WifiManager::class.java)
-            multicastLock = wifi.createMulticastLock("universal-clipboard").apply {
+            multicastLock = wifi.createMulticastLock("clipcircle").apply {
                 setReferenceCounted(false)
                 acquire()
             }

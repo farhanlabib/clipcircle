@@ -14,7 +14,7 @@ use crate::protocol::Message;
 use crate::transport::{self, read_frame, write_frame};
 use crate::{Member, State};
 
-const SPAKE_ID: &[u8] = b"universal-clipboard/pair/v1";
+const SPAKE_ID: &[u8] = b"clipcircle/pair/v1";
 /// Wrong codes the host tolerates before it stops pairing.
 pub const MAX_ATTEMPTS: usize = 3;
 

@@ -4,7 +4,7 @@
 use anyhow::Result;
 
 #[cfg(feature = "os-keychain")]
-const SERVICE: &str = "universal-clipboard";
+const SERVICE: &str = "clipcircle";
 
 #[cfg(feature = "os-keychain")]
 fn entry(device_id: &str) -> Result<keyring::Entry> {

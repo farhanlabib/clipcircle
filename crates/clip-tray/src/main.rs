@@ -1,4 +1,4 @@
-//! Universal Clipboard tray app: runs the sync engine in the background and
+//! ClipCircle tray app: runs the sync engine in the background and
 //! offers a small window to pair devices, manage the circle and see history.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -287,8 +287,7 @@ fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            let open =
-                MenuItem::with_id(app, "open", "Open Universal Clipboard", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Open ClipCircle", true, None::<&str>)?;
             let pause = MenuItem::with_id(app, "pause", "Pause syncing", true, None::<&str>)?;
             let at_login = CheckMenuItem::with_id(
                 app,
@@ -305,7 +304,7 @@ fn main() {
             let at_login_item = at_login.clone();
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().expect("app icon"))
-                .tooltip("Universal Clipboard")
+                .tooltip("ClipCircle")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| match event.id.as_ref() {

@@ -24,7 +24,7 @@ const KEEP_RECEIVED: usize = 3;
 
 /// Where received files go unless the app picks a folder.
 pub fn default_received_dir() -> PathBuf {
-    std::env::temp_dir().join("universal-clipboard")
+    std::env::temp_dir().join("clipcircle")
 }
 
 /// Sends the contents of `files`, which the peer expects after the clip.

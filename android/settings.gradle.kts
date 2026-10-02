@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "UniversalClipboard"
+rootProject.name = "ClipCircle"
 include(":app")
