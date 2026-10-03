@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo fmt:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo run -p clipd:*)",
+      "Bash(cargo run -p clip-tray:*)",
+      "Bash(cargo run -p clip-ffi --features bindgen:*)",
+      "Bash(cargo ndk:*)",
+      "Bash(cargo metadata:*)",
+      "Bash(bash scripts/check-android-kotlin.sh)",
+      "Bash(gradle assembleDebug:*)",
+      "Bash(adb devices:*)",
+      "Bash(adb install:*)",
+      "Bash(adb logcat:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)"
+    ],
+    "deny": [
+      "Read(**/*.jks)",
+      "Read(**/*.keystore)"
+    ]
+  }
+}
