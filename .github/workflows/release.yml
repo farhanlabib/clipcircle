@@ -1,12 +1,19 @@
 name: Release
 
-# Builds the installers for every platform. Pushing a tag like v0.2.0 (it must
-# match the version in Cargo.toml) publishes them as a GitHub release. Running
-# the workflow by hand only builds them; download them from the run.
+# Builds the installers for every platform and publishes them as a GitHub
+# release when either a tag like v0.2.0 is pushed, or the workflow is run by
+# hand on main with "publish" ticked (it then creates the tag). The tag must
+# match the version in Cargo.toml. Run by hand without "publish", it only
+# builds them; download them from the run.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a release for the version in Cargo.toml
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -16,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
       - id: version
@@ -26,6 +34,15 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match the version in Cargo.toml ($version)"
             exit 1
           fi
+          if [ "$GITHUB_REF_TYPE" = tag ] || [ "$PUBLISH" = true ]; then
+            if [ "$GITHUB_REF_TYPE" != tag ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::Releases are published from main"
+              exit 1
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          PUBLISH: ${{ inputs.publish }}
 
   desktop:
     name: desktop (${{ matrix.name }})
@@ -121,11 +138,12 @@ jobs:
       - name: Set up the signing key
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PUBLISH: ${{ needs.version.outputs.publish }}
         run: |
           if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
             echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
             echo "ANDROID_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+          elif [ "$PUBLISH" = true ]; then
             echo "::error::The ANDROID_KEYSTORE_BASE64 secret is not set, and a release APK needs the release key"
             exit 1
           else
@@ -148,7 +166,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.ref_type == 'tag'
+    if: needs.version.outputs.publish == 'true'
     needs: [version, desktop, android]
     runs-on: ubuntu-latest
     permissions:
@@ -167,6 +185,6 @@ jobs:
           (cd dist && sha256sum * > SHA256SUMS.txt)
           prerelease=
           case "$VERSION" in *-*) prerelease=--prerelease ;; esac
-          gh release create "$GITHUB_REF_NAME" dist/* $prerelease \
+          gh release create "v$VERSION" dist/* $prerelease --target "$GITHUB_SHA" \
             --title "ClipCircle $VERSION" \
             --notes-file .github/release-notes.md --generate-notes

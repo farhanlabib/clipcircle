@@ -32,9 +32,10 @@ CI runs the same checks on Linux, macOS and Windows and builds the Android app.
 
 ## Releasing
 
-Maintainers bump `version` in the root `Cargo.toml`, merge, and push a tag
-`v<version>`. The **Release** workflow builds every installer and publishes
-them on the Releases page.
+Maintainers bump `version` in the root `Cargo.toml`, merge, and then either
+push a tag `v<version>` or run the **Release** workflow on `main` with
+**publish** ticked. It builds every installer and publishes them on the
+Releases page.
 
 ## License
 
