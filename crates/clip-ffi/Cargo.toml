@@ -22,5 +22,5 @@ clip-core = { path = "../clip-core", default-features = false }
 anyhow.workspace = true
 tokio.workspace = true
 tracing = "0.1"
-uniffi = "0.29"
+uniffi = "0.32"
 thiserror = "2"
