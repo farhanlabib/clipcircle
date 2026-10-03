@@ -26,6 +26,6 @@ sha2 = "0.10"
 dirs = "5"
 gethostname = "0.5"
 base64 = "0.22"
-png = "0.17"
+png = "0.18"
 keyring = { version = "3", optional = true, features = ["apple-native", "windows-native", "sync-secret-service", "vendored", "crypto-rust"] }
 tracing = "0.1"
