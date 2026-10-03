@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import java.util.concurrent.Executors
@@ -26,6 +27,17 @@ class ClipApp : Application() {
 
     private val main = Handler(Looper.getMainLooper())
 
+    /** When the circle last put something on the clipboard (elapsedRealtime). */
+    @Volatile
+    var ownClipAt = 0L
+        private set
+
+    /** Puts a clip from the circle on the clipboard. Main thread. */
+    fun setOwnClip(clip: ClipData) {
+        ownClipAt = SystemClock.elapsedRealtime()
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+    }
+
     /** Screens listen here to refresh when pairing finishes. */
     var onPairingResult: ((ok: Boolean, message: String) -> Unit)? = null
 
@@ -33,18 +45,12 @@ class ClipApp : Application() {
         super.onCreate()
         val listener = object : ClipListener {
             override fun onClip(text: String) {
-                main.post {
-                    val clipboard = getSystemService(ClipboardManager::class.java)
-                    clipboard.setPrimaryClip(ClipData.newPlainText("From your devices", text))
-                }
+                main.post { setOwnClip(ClipData.newPlainText(LABEL_TEXT, text)) }
             }
 
             override fun onImage(png: ByteArray) {
                 val uri = ClipImageProvider.save(this@ClipApp, png)
-                main.post {
-                    val clipboard = getSystemService(ClipboardManager::class.java)
-                    clipboard.setPrimaryClip(ClipData.newUri(contentResolver, "Image from your devices", uri))
-                }
+                main.post { setOwnClip(ClipData.newUri(contentResolver, LABEL_IMAGE, uri)) }
             }
 
             override fun onFiles(files: List<SharedFile>) {
@@ -71,6 +77,15 @@ class ClipApp : Application() {
         Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)?.trim()?.takeIf { it.isNotEmpty() }
             ?: listOf(Build.MANUFACTURER, Build.MODEL).filterNot { it.isNullOrBlank() }.joinToString(" ")
                 .ifEmpty { "Android" }
+
+    companion object {
+        const val LABEL_TEXT = "From your devices"
+        const val LABEL_IMAGE = "Image from your devices"
+        const val LABEL_FILES = "Files from your devices"
+
+        /** Labels of clips the circle put on the clipboard, so they aren't sent back. */
+        val OWN_LABELS = setOf(LABEL_TEXT, LABEL_IMAGE, LABEL_FILES)
+    }
 
     /** Runs [work] on the worker, then [done] on the main thread with its result. */
     fun <T> background(work: () -> T, done: (Result<T>) -> Unit) {
