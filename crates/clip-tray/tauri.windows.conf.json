@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ClipCircle",
+        "width": 380,
+        "height": 640,
+        "resizable": false,
+        "visible": false,
+        "transparent": true,
+        "windowEffects": {
+          "effects": ["mica"]
+        }
+      }
+    ]
+  }
+}

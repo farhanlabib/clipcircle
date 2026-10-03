@@ -172,6 +172,8 @@ async fn set_paused(paused: bool, handle: AppHandle, app: tauri::State<'_, App>)
 
 #[derive(Serialize)]
 struct HistoryView {
+    /// "text", "link", "image" or "files", for the row's icon.
+    kind: &'static str,
     from: String,
     secs_ago: u64,
     preview: String,
@@ -189,13 +191,20 @@ async fn history(app: tauri::State<'_, App>) -> CmdResult<Vec<HistoryView>> {
         .into_iter()
         .map(|e| {
             let can_copy = e.full_text().is_some();
+            let kind = match &e.content {
+                Content::Text { text, .. } if is_link(text) => "link",
+                Content::Text { .. } => "text",
+                Content::Image { .. } => "image",
+                Content::Files { .. } => "files",
+            };
             let preview = match &e.content {
                 Content::Text { text, .. } => text.chars().take(200).collect(),
-                Content::Image { width, height } => format!("Image {width}×{height}"),
-                Content::Files { names } if names.len() == 1 => format!("File: {}", names[0]),
+                Content::Image { width, height } => format!("Image · {width} × {height}"),
+                Content::Files { names } if names.len() == 1 => names[0].clone(),
                 Content::Files { names } => format!("{} files: {}", names.len(), names.join(", ")),
             };
             HistoryView {
+                kind,
                 from: e.from,
                 secs_ago: now.saturating_sub(e.at),
                 preview,
@@ -203,6 +212,13 @@ async fn history(app: tauri::State<'_, App>) -> CmdResult<Vec<HistoryView>> {
             }
         })
         .collect())
+}
+
+/// A single web address, worth a link icon.
+fn is_link(text: &str) -> bool {
+    let text = text.trim();
+    (text.starts_with("https://") || text.starts_with("http://"))
+        && !text.contains(char::is_whitespace)
 }
 
 /// Puts history entry `index` (0 = newest) back on the clipboard.
@@ -242,8 +258,19 @@ fn apply_autostart(handle: &AppHandle, enabled: bool) -> CmdResult<()> {
     Ok(())
 }
 
+#[tauri::command]
+fn quit(handle: AppHandle) {
+    handle.exit(0);
+}
+
 fn show_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        // On macOS the window opens under the menu bar icon, like a popover.
+        #[cfg(target_os = "macos")]
+        {
+            use tauri_plugin_positioner::{Position, WindowExt};
+            let _ = w.move_window(Position::TrayBottomCenter);
+        }
         let _ = w.show();
         let _ = w.set_focus();
     }
@@ -262,6 +289,7 @@ fn main() {
         .unwrap_or_else(|| State::default_path().expect("no config directory"));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -280,7 +308,8 @@ fn main() {
             copy_history,
             autostart,
             set_autostart,
-            check_devices
+            check_devices,
+            quit
         ])
         .setup(|app| {
             // A menu bar app on macOS: no Dock icon.
@@ -338,6 +367,8 @@ fn main() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
+                    // Remembers where the icon is, for placing the window under it.
+                    tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
@@ -374,12 +405,18 @@ fn main() {
             });
             Ok(())
         })
-        .on_window_event(|window, event| {
+        .on_window_event(|window, event| match event {
             // Closing the window keeps the app running in the tray.
-            if let WindowEvent::CloseRequested { api, .. } = event {
+            WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 let _ = window.hide();
             }
+            // Like a popover, it goes away when you click elsewhere.
+            #[cfg(target_os = "macos")]
+            WindowEvent::Focused(false) => {
+                let _ = window.hide();
+            }
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("error while running the app");
