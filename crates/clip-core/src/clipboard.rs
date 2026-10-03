@@ -210,7 +210,7 @@ fn encode_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>> {
 const MAX_PIXELS: usize = 64 * 1024 * 1024;
 
 fn decode_png(bytes: &[u8]) -> Result<Clip> {
-    let mut decoder = png::Decoder::new(bytes);
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().context("not a PNG")?;
     let (width, height) = {
@@ -220,7 +220,8 @@ fn decode_png(bytes: &[u8]) -> Result<Clip> {
     if width * height > MAX_PIXELS {
         bail!("image of {width}x{height} is too large");
     }
-    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let size = reader.output_buffer_size().context("image is too large")?;
+    let mut buf = vec![0u8; size];
     let frame = reader.next_frame(&mut buf)?;
     buf.truncate(frame.buffer_size());
     let rgba = match frame.color_type {
