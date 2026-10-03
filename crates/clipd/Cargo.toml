@@ -9,6 +9,6 @@ clip-core = { path = "../clip-core" }
 anyhow.workspace = true
 tokio.workspace = true
 clap = { version = "4", features = ["derive"] }
-if-addrs = "0.13"
+if-addrs = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
