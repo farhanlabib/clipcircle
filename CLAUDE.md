@@ -17,7 +17,7 @@ Owner: Md. Farhan Labib (GitHub `farhanlabib`). The repo is public: github.com/f
 | `crates/clip-core/tests/end_to_end.rs` | Two or more in-process devices pairing and syncing. Add a test here for any protocol change. |
 | `crates/clipd` | Command-line daemon: `pair`, `join`, `run`, `devices`, `remove`, `history`, `doctor`. |
 | `crates/clip-tray` | Desktop app (Tauri 2, binary `clipcircle`). `src/main.rs` holds the tray, the window and the Tauri commands. `ui/` is plain HTML/CSS/JS with no bundler; styles switch on `data-os` (macos/windows/linux). Per-OS window config is in `tauri.macos.conf.json` (transparent popover, vibrancy) and `tauri.windows.conf.json` (Mica). |
-| `crates/clip-ffi` | UniFFI 0.29 bindings for Android: `Node`, `ClipListener`, records `Device`, `DeviceCheck`, `HistoryItem`, `SharedFile`. |
+| `crates/clip-ffi` | UniFFI 0.32 bindings for Android: `Node`, `ClipListener`, records `Device`, `DeviceCheck`, `HistoryItem`, `SharedFile`. |
 | `android/` | Kotlin app, package `dev.farhanlabib.clipcircle`. Framework Views only (`android.useAndroidX=false`, no Compose). `Look.kt` has the Material 3 palette and building blocks, `ClipApp` owns the Rust node (its calls block, so run them on `worker`), `MainActivity` the screen, `SyncService` the foreground service, `ReceivedFiles` moves received files to Downloads/ClipCircle, `ClipImageProvider` serves received images to the pasting app, `SendActivity` sends the clipboard or a share, `AutoSend` handles opt-in automatic sending, `Outbox` holds the shared send code. |
 | `scripts/check-android-kotlin.sh` | Type-checks the Kotlin code without the Android SDK. |
 | `.github/workflows/ci.yml` | Lint, tests on Linux/macOS/Windows, and an Android APK build. |
