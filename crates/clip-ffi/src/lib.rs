@@ -7,9 +7,12 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clip_core::clipboard::{self, Clip, Clipboard, FileRef};
+use clip_core::history::{Content, Entry, History};
 use clip_core::service::{self, Options, Service};
+use clip_core::sync::Reach;
 use clip_core::State;
 
 uniffi::setup_scaffolding!();
@@ -60,6 +63,30 @@ pub struct SharedFile {
 pub struct Device {
     pub id: String,
     pub name: String,
+    /// Seen on this network while syncing.
+    pub online: bool,
+}
+
+/// What [`Node::check_devices`] found for one device.
+#[derive(uniffi::Record)]
+pub struct DeviceCheck {
+    pub id: String,
+    pub ok: bool,
+    /// One line on what the check found, plus a next step when it failed.
+    pub detail: String,
+}
+
+/// A clip copied on this device or received, for the Recent list.
+#[derive(uniffi::Record)]
+pub struct HistoryItem {
+    /// "text", "link", "image" or "files", for the row's icon.
+    pub kind: String,
+    pub preview: String,
+    /// Name of the device it was copied on.
+    pub from: String,
+    pub secs_ago: u64,
+    /// The whole text, when it can be copied again.
+    pub text: Option<String>,
 }
 
 /// The engine's view of the clipboard: whatever the app last handed over or
@@ -172,18 +199,54 @@ impl Node {
     }
 
     pub fn members(&self) -> Result<Vec<Device>> {
-        let state = match self.service.lock().unwrap().as_ref() {
-            Some(s) => self.runtime.block_on(s.engine().state()),
-            None => State::load_or_create(&self.state_path)?,
+        let (state, peers) = match self.service.lock().unwrap().as_ref() {
+            Some(s) => {
+                let engine = s.engine();
+                let peers = engine.peers.lock().unwrap().clone();
+                (self.runtime.block_on(engine.state()), peers)
+            }
+            None => (State::load_or_create(&self.state_path)?, Default::default()),
         };
         Ok(state
             .members
             .into_iter()
             .map(|m| Device {
+                online: peers.contains_key(&m.id),
                 id: m.id,
                 name: m.name,
             })
             .collect())
+    }
+
+    /// Connects to every device in the circle and reports what worked.
+    pub fn check_devices(&self) -> Result<Vec<DeviceCheck>> {
+        let engine = self.engine()?;
+        Ok(self
+            .runtime
+            .block_on(engine.check_members())
+            .into_iter()
+            .map(|m| DeviceCheck {
+                ok: matches!(m.reach, Reach::Ok { .. }),
+                detail: describe(&m.reach),
+                id: m.id,
+            })
+            .collect())
+    }
+
+    /// Recent clips, newest first.
+    pub fn history(&self) -> Result<Vec<HistoryItem>> {
+        let entries = match self.service.lock().unwrap().as_ref() {
+            Some(s) => s.engine().history_entries(),
+            None => History::load(&History::path_for(&self.state_path))?
+                .entries()
+                .cloned()
+                .collect(),
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        Ok(entries.iter().map(|e| history_item(e, now)).collect())
     }
 
     /// Sends text the user copied on this device to the circle.
@@ -274,6 +337,48 @@ impl Node {
     }
 }
 
+/// One line on a device check, with a next step when it failed.
+fn describe(reach: &Reach) -> String {
+    let found = match reach {
+        Reach::Ok { millis, .. } => format!("Connected ({millis} ms)"),
+        Reach::NotFound => String::new(),
+        Reach::Failed { error } => format!("Could not connect: {error}"),
+    };
+    match (reach, reach.hint()) {
+        (Reach::NotFound, Some(hint)) => hint.to_owned(),
+        (_, Some(hint)) => format!("{found}. {hint}"),
+        (_, None) => found,
+    }
+}
+
+fn history_item(e: &Entry, now: u64) -> HistoryItem {
+    let (kind, preview) = match &e.content {
+        Content::Text { text, .. } => (
+            if is_link(text) { "link" } else { "text" },
+            text.chars().take(200).collect(),
+        ),
+        Content::Image { width, height } => ("image", format!("Image · {width} × {height}")),
+        Content::Files { names } if names.len() == 1 => ("files", names[0].clone()),
+        Content::Files { names } => (
+            "files",
+            format!("{} files: {}", names.len(), names.join(", ")),
+        ),
+    };
+    HistoryItem {
+        kind: kind.to_owned(),
+        preview,
+        from: e.from.clone(),
+        secs_ago: now.saturating_sub(e.at),
+        text: e.full_text().map(str::to_owned),
+    }
+}
+
+fn is_link(text: &str) -> bool {
+    let text = text.trim();
+    (text.starts_with("https://") || text.starts_with("http://"))
+        && !text.contains(char::is_whitespace)
+}
+
 /// Turns a display name from another app into a safe bare file name.
 fn clean_file_name(name: &str) -> String {
     let cleaned: String = name
@@ -307,6 +412,50 @@ mod tests {
         assert_eq!(clean_file_name("a/b\\c:d.txt"), "a_b_c_d.txt");
         assert_eq!(clean_file_name(".."), "file");
         assert_eq!(clean_file_name("  "), "file");
+    }
+
+    #[test]
+    fn history_items_describe_each_kind() {
+        let entry = |content| Entry {
+            at: 100,
+            from: "mac".into(),
+            content,
+        };
+        let link = history_item(
+            &entry(Content::Text {
+                text: "https://example.com".into(),
+                truncated: false,
+            }),
+            160,
+        );
+        assert_eq!((link.kind.as_str(), link.secs_ago), ("link", 60));
+        assert_eq!(link.text.as_deref(), Some("https://example.com"));
+        let cut = history_item(
+            &entry(Content::Text {
+                text: "long".into(),
+                truncated: true,
+            }),
+            100,
+        );
+        assert_eq!((cut.kind.as_str(), cut.text), ("text", None));
+        let image = history_item(
+            &entry(Content::Image {
+                width: 2880,
+                height: 1800,
+            }),
+            100,
+        );
+        assert_eq!(image.preview, "Image · 2880 × 1800");
+        let files = history_item(
+            &entry(Content::Files {
+                names: vec!["a.pdf".into()],
+            }),
+            100,
+        );
+        assert_eq!(
+            (files.kind.as_str(), files.preview.as_str()),
+            ("files", "a.pdf")
+        );
     }
 
     struct Quiet;
