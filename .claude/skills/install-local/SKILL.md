@@ -7,6 +7,8 @@ description: Build the current checkout and install it on this Mac (/Application
 
 Install only what was asked for (Mac, phone, or both). Work from the repo root.
 
+Machine-specific paths (Rust, Android SDK and NDK, which Gradle to use) are in `CLAUDE.local.md` when it exists. Read it first.
+
 ## Mac app
 
 1. Run `cd crates/clip-tray && npx @tauri-apps/cli@2 build --bundles app`.
@@ -17,14 +19,14 @@ Install only what was asked for (Mac, phone, or both). Work from the repo root.
 ## Android phone
 
 1. Run `adb devices`. If no device is listed, ask the user to plug in the phone and allow USB debugging.
-2. Build the native library and the bindings (one-time setup: `rustup target add aarch64-linux-android x86_64-linux-android`, `cargo install cargo-ndk`, an NDK, and JDK 17):
+2. Export `ANDROID_HOME` and `ANDROID_NDK_ROOT` (cargo-ndk needs the NDK). Build the native library and the bindings (one-time setup: `rustup target add aarch64-linux-android x86_64-linux-android`, `cargo install cargo-ndk`, an NDK, and JDK 17):
    ```sh
    cargo ndk -t arm64-v8a -t x86_64 -o android/app/src/main/jniLibs build -p clip-ffi --release
    cargo run -p clip-ffi --features bindgen --bin uniffi-bindgen -- generate \
      --library target/aarch64-linux-android/release/libclip_ffi.so --language kotlin \
      --out-dir android/app/src/main/java --no-format
    ```
-3. Run `cd android && gradle assembleDebug`, then `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
+3. Run `cd android && gradle assembleDebug` (with no `gradle` on PATH, use a Gradle 8.11+ install, for example a cached one under `~/.gradle/wrapper/dists`), then `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
 4. If the install fails with a signature mismatch (a release build is installed), ask the user before running `adb uninstall dev.farhanlabib.clipcircle`. Uninstalling wipes the pairing.
 5. Never grant READ_LOGS and never turn on Send automatically. The user opts in from the app.
 

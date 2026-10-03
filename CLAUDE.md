@@ -13,12 +13,12 @@ Owner: Md. Farhan Labib (GitHub `farhanlabib`). The repo is public: github.com/f
 
 | Path | What it is |
 |---|---|
-| `crates/clip-core` | All platform-independent logic. `state` (device keys, members, tombstones), `pairing` (SPAKE2 → Noise NNpsk0), `discovery` (mDNS `_clipcircle._tcp`, `_clipcircle-pair._tcp`), `transport` (Noise XX over TCP, u16-length frames), `sync` (the `Engine`: poll clipboard, push to members, apply incoming, gossip members, `check_members`), `transfer` (files streamed disk to disk, 4 GiB cap), `history` (last 50 clips, text kept in full), `keychain`, `clipboard` (`Clip`, `Clipboard` trait, arboard impl), `service` (`Service::start` = engine + listener + mDNS + pairing; shared by every app). Default port 47800. |
+| `crates/clip-core` | All platform-independent logic. `state` (device keys, members, tombstones), `pairing` (SPAKE2 → Noise NNpsk0), `discovery` (mDNS `_clipcircle._tcp`, `_clipcircle-pair._tcp`), `transport` (Noise XX over TCP, u16-length frames), `protocol` (the `Message` enum sent inside the channel), `sync` (the `Engine`: poll clipboard, push to members, apply incoming, gossip members, `check_members`), `transfer` (files streamed disk to disk, 4 GiB cap), `history` (last 50 clips, texts cut to 64 KiB), `keychain`, `clipboard` (`Clip`, `Clipboard` trait, arboard impl), `service` (`Service::start` = engine + listener + mDNS + pairing; shared by every app). Default port 47800. |
 | `crates/clip-core/tests/end_to_end.rs` | Two or more in-process devices pairing and syncing. Add a test here for any protocol change. |
 | `crates/clipd` | Command-line daemon: `pair`, `join`, `run`, `devices`, `remove`, `history`, `doctor`. |
 | `crates/clip-tray` | Desktop app (Tauri 2, binary `clipcircle`). `src/main.rs` holds the tray, the window and the Tauri commands. `ui/` is plain HTML/CSS/JS with no bundler; styles switch on `data-os` (macos/windows/linux). Per-OS window config is in `tauri.macos.conf.json` (transparent popover, vibrancy) and `tauri.windows.conf.json` (Mica). |
 | `crates/clip-ffi` | UniFFI 0.29 bindings for Android: `Node`, `ClipListener`, records `Device`, `DeviceCheck`, `HistoryItem`, `SharedFile`. |
-| `android/` | Kotlin app, package `dev.farhanlabib.clipcircle`. Framework Views only (`android.useAndroidX=false`, no Compose). `Look.kt` has the Material 3 palette and building blocks, `MainActivity` the screen, `SyncService` the foreground service, `SendActivity` sends the clipboard or a share, `AutoSend` handles opt-in automatic sending, `Outbox` holds the shared send code. |
+| `android/` | Kotlin app, package `dev.farhanlabib.clipcircle`. Framework Views only (`android.useAndroidX=false`, no Compose). `Look.kt` has the Material 3 palette and building blocks, `ClipApp` owns the Rust node (its calls block, so run them on `worker`), `MainActivity` the screen, `SyncService` the foreground service, `ReceivedFiles` moves received files to Downloads/ClipCircle, `ClipImageProvider` serves received images to the pasting app, `SendActivity` sends the clipboard or a share, `AutoSend` handles opt-in automatic sending, `Outbox` holds the shared send code. |
 | `scripts/check-android-kotlin.sh` | Type-checks the Kotlin code without the Android SDK. |
 | `.github/workflows/ci.yml` | Lint, tests on Linux/macOS/Windows, and an Android APK build. |
 | `.github/workflows/release.yml` | Builds every installer and publishes a GitHub Release (see Releasing). |
@@ -50,14 +50,14 @@ CI runs the same checks and must be green before merging.
   cd android && gradle assembleDebug && adb install -r app/build/outputs/apk/debug/app-debug.apk
   ```
   `jniLibs/` and `java/uniffi/` are generated and ignored by git.
-- The desktop app and `clipd` share a state file (`~/Library/Application Support/clipcircle/state.json` on macOS; `CLIPD_STATE` overrides it). Don't run both at once.
+- The desktop app and `clipd` share a state file (`~/Library/Application Support/clipcircle/state.json` on macOS). The desktop app reads `CLIPD_STATE` to override it; `clipd` takes `--state`. Don't run both at once.
 
 ## How the pieces fit
 
 - Every app goes through `clip_core::service::Service`, so behaviour stays the same everywhere. Put logic in clip-core, not in an app.
 - Desktop apps poll the system clipboard every 500 ms. Android can't read the clipboard in the background, so the app hands clips over itself: `Node::send_text`, `send_image` or `send_files` from `SendActivity` (the Send clipboard button, the notification action, or a share). Incoming clips arrive through `ClipListener` and go on the clipboard via `ClipApp.setOwnClip`.
 - Echo guard: clips the circle puts on the clipboard carry a label in `ClipApp.OWN_LABELS` and are never sent back out. The engine also skips a clip whose hash matches the last one sent or received.
-- Received files go to a temp folder on desktop and to Downloads/ClipCircle on Android. Received files are never re-sent.
+- Received files go to `<temp dir>/clipcircle` on desktop and to Downloads/ClipCircle on Android. Received files are never re-sent.
 
 ## Product decisions (don't undo without asking Labib)
 
