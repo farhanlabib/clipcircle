@@ -18,7 +18,7 @@ serde_json.workspace = true
 tokio.workspace = true
 snow = "0.10"
 spake2 = "0.4"
-mdns-sd = "0.13"
+mdns-sd = "0.21"
 arboard = { version = "3", optional = true }
 rand = "0.8"
 hex = "0.4"
