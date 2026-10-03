@@ -22,6 +22,7 @@ Owner: Md. Farhan Labib (GitHub `farhanlabib`). The repo is public: github.com/f
 | `scripts/check-android-kotlin.sh` | Type-checks the Kotlin code without the Android SDK. |
 | `.github/workflows/ci.yml` | Lint, tests on Linux/macOS/Windows, and an Android APK build. |
 | `.github/workflows/release.yml` | Builds every installer and publishes a GitHub Release (see Releasing). |
+| `.claude/` | Claude Code settings (pre-approved build and test commands) and skills: `install-local` (build and install on this Mac and the USB phone) and `release`. |
 
 The version lives in one place: `version` in the root `Cargo.toml`. Tauri and the Android build (`versionName`, `versionCode = major*10000+minor*100+patch`) read it from there.
 
