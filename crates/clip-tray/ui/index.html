@@ -7,59 +7,106 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <div>
-      <h1 id="device-name">ClipCircle</h1>
-      <p class="muted" id="sync-state">Starting…</p>
-    </div>
-    <label class="switch" title="Sync on or off">
-      <input type="checkbox" id="sync-toggle" checked>
-      <span></span>
-    </label>
-  </header>
+  <!-- Icons, drawn once and used by id. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-laptop" viewBox="0 0 24 24"><path d="M4.5 6.5h15v9h-15z"/><path d="M2.5 18.5h19"/></symbol>
+    <symbol id="i-desktop" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r=".8"/><circle cx="12" cy="12" r=".8"/><circle cx="18" cy="12" r=".8"/></symbol>
+    <symbol id="i-text" viewBox="0 0 24 24"><path d="M5 6h14M5 10h14M5 14h9"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 16l-5-5-9 8.5"/></symbol>
+    <symbol id="i-files" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></symbol>
+  </svg>
 
-  <p class="error" id="error" hidden></p>
-
-  <section>
-    <h2>Devices in your circle</h2>
-    <ul id="members" class="list"></ul>
-    <div class="row">
-      <button id="pair-btn">Add a device</button>
-      <button id="join-btn" class="secondary">Join a circle</button>
-    </div>
-    <button id="check-btn" class="link plain">Check connections</button>
-    <div id="pair-panel" class="panel" hidden>
-      <p>On the other device, choose <b>Join a circle</b> and type:</p>
-      <p class="code" id="pair-code"></p>
-      <p class="muted" id="pair-status">Waiting for the other device…</p>
-    </div>
-    <form id="join-panel" class="panel" hidden>
-      <p>Type the 6-digit code shown on a device in the circle you want to join.</p>
-      <div class="row">
-        <input id="join-code" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="off">
-        <button type="submit">Join</button>
+  <main class="pane">
+    <header class="me">
+      <div class="me-icon"><svg class="icon"><use href="#i-laptop" id="me-glyph"/></svg></div>
+      <div class="me-text">
+        <h1 id="device-name">ClipCircle</h1>
+        <p class="s" id="sync-state">Starting…</p>
       </div>
-      <p class="muted" id="join-status"></p>
+      <label class="switch" title="Sync on or off">
+        <input type="checkbox" id="sync-toggle" role="switch" aria-label="Sync" checked>
+        <span></span>
+      </label>
+    </header>
+
+    <p class="error" id="error" role="alert" hidden></p>
+
+    <section id="home-view">
+      <h2 class="h" id="devices-heading">Devices</h2>
+      <ul id="members" class="well list" aria-labelledby="devices-heading"></ul>
+      <div id="empty-circle" class="well empty" hidden>
+        <p class="t strong">Your circle is just this device</p>
+        <p class="s">Add your phone or another computer, and whatever you copy on one is ready to paste on the others.</p>
+      </div>
+      <div class="actions">
+        <button id="pair-btn" class="cap tint"><svg class="icon"><use href="#i-plus"/></svg>Add a device</button>
+        <button id="join-btn" class="cap">Join a circle</button>
+      </div>
+    </section>
+
+    <section id="pair-view" hidden>
+      <div class="well panel">
+        <div class="panel-head">
+          <button class="ghost icon-only back" aria-label="Back"><svg class="icon"><use href="#i-back"/></svg></button>
+          <h2 class="t strong">Add a device</h2>
+        </div>
+        <p class="s">On the other device, choose <b>Join a circle</b> and type this code.</p>
+        <div class="digits" id="pair-code" aria-live="polite"></div>
+        <p class="s status" id="pair-status"></p>
+      </div>
+      <div class="actions">
+        <button class="cap back">Cancel</button>
+      </div>
+    </section>
+
+    <form id="join-view" hidden>
+      <div class="well panel">
+        <div class="panel-head">
+          <button type="button" class="ghost icon-only back" aria-label="Back"><svg class="icon"><use href="#i-back"/></svg></button>
+          <h2 class="t strong">Join a circle</h2>
+        </div>
+        <p class="s">Type the 6-digit code shown on a device that's already in the circle.</p>
+        <div class="digits" id="join-digits" role="group" aria-label="Pairing code"></div>
+        <p class="s status" id="join-status">Both devices need to be on the same network.</p>
+      </div>
+      <div class="actions">
+        <button type="button" class="cap back">Cancel</button>
+        <button type="submit" class="cap tint" id="join-submit" disabled>Join</button>
+      </div>
     </form>
-  </section>
 
-  <section>
-    <h2>Recent clips</h2>
-    <ul id="history" class="list history"></ul>
-  </section>
+    <h2 class="h" id="recent-heading">Recent</h2>
+    <ul id="history" class="well list" aria-labelledby="recent-heading"></ul>
 
-  <section>
-    <h2>Settings</h2>
-    <ul class="list">
-      <li>
-        <label for="autostart-toggle">Start at login</label>
-        <label class="switch" title="Start ClipCircle when you log in">
-          <input type="checkbox" id="autostart-toggle">
+    <footer>
+      <button id="check-btn" class="ghost"><svg class="icon small"><use href="#i-refresh"/></svg><span>Check connections</span></button>
+      <button id="settings-btn" class="ghost icon-only muted" aria-label="Settings" aria-expanded="false" aria-controls="settings"><svg class="icon small"><use href="#i-gear"/></svg></button>
+    </footer>
+    <div id="settings" class="well list" hidden>
+      <div class="row">
+        <label for="autostart-toggle" class="t grow">Start at login</label>
+        <label class="switch">
+          <input type="checkbox" id="autostart-toggle" role="switch">
           <span></span>
         </label>
-      </li>
-    </ul>
-  </section>
+      </div>
+      <div class="row">
+        <span class="t grow">Quit ClipCircle</span>
+        <button id="quit-btn" class="ghost">Quit</button>
+      </div>
+    </div>
+  </main>
+
+  <div id="device-menu" class="menu" role="menu" hidden>
+    <button role="menuitem" id="remove-btn" class="danger">Remove from circle</button>
+  </div>
 
   <script src="app.js"></script>
 </body>

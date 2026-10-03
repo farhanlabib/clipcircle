@@ -7,12 +7,13 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
         "title": "ClipCircle",
         "width": 380,
-        "height": 600,
+        "height": 640,
         "resizable": false,
         "visible": false
       }
