@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{bail, Result};
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use mdns_sd::{ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
 
 pub const SYNC_SERVICE: &str = "_clipcircle._tcp.local.";
 pub const PAIR_SERVICE: &str = "_clipcircle-pair._tcp.local.";
@@ -72,8 +72,10 @@ pub fn browse_circle(circle_id: String, self_id: String, peers: PeerMap) -> Resu
                     if circle != Some(circle_id.as_str()) || device == self_id {
                         continue;
                     }
-                    let addrs =
-                        dialable_addrs(info.get_addresses().iter().copied(), info.get_port());
+                    let addrs = dialable_addrs(
+                        info.get_addresses().iter().map(ScopedIp::to_ip_addr),
+                        info.get_port(),
+                    );
                     // Early resolves can carry only link-local addresses; wait for a usable one.
                     if addrs.is_empty() {
                         continue;
@@ -126,7 +128,10 @@ pub async fn scan(wait: Duration) -> Result<Vec<Announced>> {
                 ) else {
                     continue;
                 };
-                let addrs = dialable_addrs(info.get_addresses().iter().copied(), info.get_port());
+                let addrs = dialable_addrs(
+                    info.get_addresses().iter().map(ScopedIp::to_ip_addr),
+                    info.get_port(),
+                );
                 let entry = found.entry(device.to_owned()).or_insert(Announced {
                     device: device.to_owned(),
                     circle: circle.to_owned(),
@@ -157,7 +162,10 @@ pub async fn find_pairing_host(timeout: Duration) -> Result<SocketAddr> {
     let found = tokio::time::timeout(timeout, async {
         while let Ok(event) = events.recv_async().await {
             if let ServiceEvent::ServiceResolved(info) = event {
-                let addrs = dialable_addrs(info.get_addresses().iter().copied(), info.get_port());
+                let addrs = dialable_addrs(
+                    info.get_addresses().iter().map(ScopedIp::to_ip_addr),
+                    info.get_port(),
+                );
                 if let Some(addr) = addrs.into_iter().find(|a| a.is_ipv4()) {
                     return Some(addr);
                 }
