@@ -744,7 +744,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "clip-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -767,7 +767,7 @@ dependencies = [
 
 [[package]]
 name = "clip-ffi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clip-core",
@@ -779,7 +779,7 @@ dependencies = [
 
 [[package]]
 name = "clip-tray"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clip-core",
@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "clipd"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
