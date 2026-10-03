@@ -6,7 +6,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -52,9 +51,9 @@ object ReceivedFiles {
     /** Puts [uris] on the clipboard and tells the user where the files are. Main thread. */
     fun announce(context: Context, names: List<String>, uris: List<Uri>) {
         val resolver = context.contentResolver
-        val clip = ClipData.newUri(resolver, "Files from your devices", uris.first())
+        val clip = ClipData.newUri(resolver, ClipApp.LABEL_FILES, uris.first())
         uris.drop(1).forEach { clip.addItem(resolver, ClipData.Item(it)) }
-        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+        context.clipApp.setOwnClip(clip)
 
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(

@@ -47,7 +47,13 @@ Linux); turn on **Start at login** to keep it running.
   clipboard; files go to Downloads/ClipCircle. Android only lets the app in
   front read the clipboard, so to send from the phone tap **Send clipboard**
   (in the app or its notification), or share text, images or files to
-  **Send to my devices**.
+  **Send to my devices**. If you'd rather every copy go out on its own, turn
+  on **Send automatically**. It is off by default and says what it needs
+  first: "Display over other apps", and permission to read the system log,
+  granted once from a computer with `adb shell pm grant
+  dev.farhanlabib.clipcircle android.permission.READ_LOGS`. It watches the log
+  for the line saying the clipboard changed and takes focus for a moment to
+  read it, the way KDE Connect does.
 - **Private by design.** Devices pair with a short code and then talk only to
   each other, encrypted. Nothing goes through a server.
 - **Recent clips.** The last 50 text clips are kept locally; click one to copy

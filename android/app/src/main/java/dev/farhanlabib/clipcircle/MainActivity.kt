@@ -3,11 +3,15 @@ package dev.farhanlabib.clipcircle
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
@@ -29,6 +33,11 @@ class MainActivity : Activity() {
     private lateinit var pairPanel: TextView
     private lateinit var joinCode: EditText
     private lateinit var joinStatus: TextView
+    private lateinit var autoSwitch: Switch
+    private lateinit var autoStatus: TextView
+    private lateinit var autoSteps: LinearLayout
+    private lateinit var overlayButton: Button
+    private lateinit var logRow: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,6 +66,7 @@ class MainActivity : Activity() {
     }
 
     private fun refresh() {
+        refreshAutoSend()
         syncSwitch.setOnCheckedChangeListener(null)
         syncSwitch.isChecked = SyncService.running
         syncSwitch.setOnCheckedChangeListener { _, on ->
@@ -69,6 +79,51 @@ class MainActivity : Activity() {
                 showMembers(list)
             }
         }
+    }
+
+    private fun refreshAutoSend() {
+        val enabled = AutoSend.enabled(this)
+        val overlay = AutoSend.canOverlay(this)
+        val log = AutoSend.canReadLog(this)
+        autoSwitch.setOnCheckedChangeListener(null)
+        autoSwitch.isChecked = enabled
+        autoSwitch.setOnCheckedChangeListener { _, on -> if (on) askAutoSend() else setAutoSend(false) }
+        autoStatus.text = when {
+            !enabled -> "Off. Copies on this phone are sent when you tap Send clipboard."
+            overlay && log && SyncService.running -> "On. Whatever you copy on this phone goes to your devices."
+            overlay && log -> "Ready. Turn syncing on to start."
+            else -> "Two one-time steps left:"
+        }
+        autoSteps.visibility = if (enabled && !(overlay && log)) View.VISIBLE else View.GONE
+        overlayButton.visibility = if (overlay) View.GONE else View.VISIBLE
+        logRow.visibility = if (log) View.GONE else View.VISIBLE
+        // Starts or stops sending to match.
+        if (SyncService.running) SyncService.start(this)
+    }
+
+    /** Says what Send automatically needs before turning it on. */
+    private fun askAutoSend() {
+        AlertDialog.Builder(this)
+            .setTitle("Send copies automatically?")
+            .setMessage(
+                "Android doesn't let apps in the background read the clipboard. To send each copy " +
+                    "without a tap, ClipCircle needs two things:\n\n" +
+                    "• Permission to read the system log, granted once from a computer. The log can hold " +
+                    "details from other apps. ClipCircle only looks for the line saying the clipboard " +
+                    "changed, and never saves or sends the log.\n\n" +
+                    "• Permission to show over other apps. After each copy ClipCircle takes focus for a " +
+                    "moment to read the clipboard, which can close an open keyboard.\n\n" +
+                    "You can turn this off any time.",
+            )
+            .setPositiveButton("Turn on") { _, _ -> setAutoSend(true) }
+            .setNegativeButton("Not now") { _, _ -> refreshAutoSend() }
+            .setOnCancelListener { refreshAutoSend() }
+            .show()
+    }
+
+    private fun setAutoSend(on: Boolean) {
+        AutoSend.setEnabled(this, on)
+        refreshAutoSend()
     }
 
     private fun showMembers(list: List<Device>) {
@@ -157,6 +212,45 @@ class MainActivity : Activity() {
             text = "Send clipboard now"
             setOnClickListener { startActivity(Intent(this@MainActivity, SendActivity::class.java)) }
         })
+
+        column.addView(section("Send automatically"))
+        val autoRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        autoStatus = text("", muted = true)
+        autoSwitch = Switch(this)
+        autoRow.addView(autoStatus, LinearLayout.LayoutParams(0, -2, 1f))
+        autoRow.addView(autoSwitch)
+        column.addView(autoRow)
+        autoSteps = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        overlayButton = Button(this).apply {
+            text = "1. Allow display over other apps"
+            setOnClickListener {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
+                )
+            }
+        }
+        autoSteps.addView(overlayButton)
+        logRow = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        logRow.addView(text("2. Connect this phone to a computer with USB debugging on and run:", muted = true))
+        logRow.addView(text(AutoSend.grantCommand(this)).apply {
+            typeface = Typeface.MONOSPACE
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTextIsSelectable(true)
+            setPadding(0, dp(6), 0, dp(6))
+        })
+        logRow.addView(Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+            text = "Copy command"
+            setOnClickListener {
+                getSystemService(ClipboardManager::class.java)
+                    .setPrimaryClip(ClipData.newPlainText("adb command", AutoSend.grantCommand(this@MainActivity)))
+            }
+        })
+        logRow.addView(text("On Android 13 and later, choose Allow when asked about device logs.", muted = true))
+        autoSteps.addView(logRow)
+        column.addView(autoSteps)
 
         column.addView(section("Devices in your circle"))
         members = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }

@@ -14,10 +14,12 @@ import android.util.Log
 
 /**
  * Keeps syncing alive while the app is in the background, so clips from other
- * devices keep arriving. Holds a multicast lock for mDNS discovery.
+ * devices keep arriving. Holds a multicast lock for mDNS discovery, and sends
+ * what's copied here automatically once [AutoSend] has its permissions.
  */
 class SyncService : Service() {
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var autoSend: AutoSend? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -40,12 +42,22 @@ class SyncService : Service() {
                 stopSelf()
             }
         }
+        // Started again by the app when Send automatically is turned on or off.
+        val wantAutoSend = AutoSend.enabled(this) && AutoSend.ready(this)
+        if (wantAutoSend && autoSend == null) {
+            autoSend = AutoSend(this).also { it.start() }
+        } else if (!wantAutoSend) {
+            autoSend?.stop()
+            autoSend = null
+        }
         running = true
         return START_STICKY
     }
 
     override fun onDestroy() {
         running = false
+        autoSend?.stop()
+        autoSend = null
         clipApp.worker.execute { clipApp.node.stop() }
         multicastLock?.release()
         multicastLock = null
