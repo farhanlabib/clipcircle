@@ -1,0 +1,23 @@
+#!/bin/sh
+# Runs a headless Claude Code on DeepSeek through the sub2api proxy.
+# The key is read from the macOS Keychain (service "sub2api") and never printed.
+#   deepseek-claude --models            list the model IDs the proxy offers
+#   deepseek-claude [claude -p args]    run a task, e.g. deepseek-claude "explain X"
+#   DEEPSEEK_MODEL=<id> overrides the default model (deepseek/deepseek-v4.1-flash)
+set -e
+BASE_URL="https://sub2api.labibnasserver.com"
+KEY="$(security find-generic-password -a "$USER" -s sub2api -w 2>/dev/null)" || {
+  echo "No key in Keychain. Add it with: security add-generic-password -a \"\$USER\" -s sub2api -w" >&2
+  exit 1
+}
+if [ "$1" = "--models" ]; then
+  curl -s -m 20 "$BASE_URL/v1/models" -H "x-api-key: $KEY" | python3 -c 'import json,sys; [print(m.get("id")) for m in json.load(sys.stdin).get("data",[])]'
+  exit 0
+fi
+# Secrets never go to DeepSeek.
+DENY='{"permissions":{"deny":["Read(**/local.properties)","Read(**/keystore/**)","Read(**/*.jks)","Read(**/*.keystore)","Read(**/google-services.json)","Read(**/.env*)","Edit(**/local.properties)","Edit(**/keystore/**)","Edit(**/google-services.json)","Read(**/state.json)","Read(**/*.pem)","Read(**/*.p12)","Edit(**/*.jks)","Edit(**/*.keystore)","Edit(**/.env*)"]}}'
+MODEL="${DEEPSEEK_MODEL:-deepseek/deepseek-v4.1-flash}"
+exec env ANTHROPIC_BASE_URL="$BASE_URL" ANTHROPIC_AUTH_TOKEN="$KEY" ANTHROPIC_API_KEY= \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+  ${MODEL:+ANTHROPIC_MODEL="$MODEL"} ${MODEL:+ANTHROPIC_SMALL_FAST_MODEL="$MODEL"} \
+  claude -p --settings "$DENY" "$@"

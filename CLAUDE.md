@@ -99,3 +99,19 @@ CI runs the same checks and must be green before merging.
 - Some routers block mDNS (client/AP isolation). `clipd doctor --addr <ip>` checks a device directly.
 - Labib's Mac has limited free disk. Delete `target/` and Android build output after big builds.
 - Open: Labib reported (2026-10-02) that manual Send clipboard from the phone didn't reach the Mac. Not yet diagnosed; suspect the firewall point above.
+
+## Jev
+
+Use the project skill at `.claude/skills/jev`. Call Jev through CommandCode, loading the
+key from the Keychain for that command only:
+CMD_API_KEY="$(security find-generic-password -a "$USER" -s commandcode-api -w)" \
+JEV_PROVIDER=commandcode python3 .claude/skills/jev/scripts/jev.py <command> ...
+Never print the key, and never send secrets in a Jev request.
+
+## Offload
+
+To save Claude tokens, hand well-scoped work (explaining code, reviewing 1–3 files, small
+edits, drafting text) to cheaper models on my Sub2API proxy with `.claude/tools/offload`,
+then validate the result. See `.claude/skills/offload/SKILL.md`. The proxy key lives only
+in the macOS Keychain (service `sub2api`); never print it or commit it, and never pass
+secret files to it.
