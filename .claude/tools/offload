@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Hand a task to a cheaper model on the sub2api proxy and print only its final answer.
+
+  offload ask    [-m MODEL] [-f FILE ...] "question"   single answer, files pasted into the prompt
+  offload review [-m MODEL] [-f FILE ...] ["focus"]     bug review of the given files
+  offload edit   [-m MODEL] [--turns N] "task"          works in a throwaway git worktree, prints its
+                                                         answer and the path of a patch to inspect
+  offload models                                        list model IDs on the proxy
+
+Runs through deepseek-claude next to this script (key from the Keychain, secret files denied).
+Exit 75 means the proxy or model is unavailable: do the task yourself.
+"""
+import argparse, fnmatch, os, subprocess, sys, tempfile, time
+
+WRAPPER = os.path.join(os.path.dirname(os.path.realpath(__file__)), "deepseek-claude")
+DEFAULTS = {"ask": "deepseek/deepseek-v4.1-flash",
+            "review": "xiaomi/mimo-v2.6-pro",
+            "edit": "deepseek/deepseek-v4.1-flash"}
+SECRETS = ["*local.properties", "*keystore*", "*.jks", "*.keystore", "*google-services.json",
+           "*.env", "*.env.*", "*secret*", "*credential*", "*.pem", "*.p12", "*state.json"]
+NOISE = ("claude.ai connectors", "model catalog", "unrecognized_model", "auto mode",
+         "no stdin data received")
+UNAVAILABLE = ("503", "502", "Service temporarily unavailable", "Service Unavailable",
+               "INSUFFICIENT_BALANCE", "not supported on this endpoint", "issue with the selected model")
+REVIEW = ("Review the code below for REAL bugs only: crashes, leaks, wrong output, threading, security. "
+          "For each bug give file:line, a concrete failing input, the actual vs expected result, and a fix. "
+          "If there are none, say 'no bugs found'. No style comments. Answer directly.")
+
+
+def is_secret(path):
+    p = path.lower()
+    return any(fnmatch.fnmatch(p, pat) or fnmatch.fnmatch(os.path.basename(p), pat) for pat in SECRETS)
+
+
+def inline(files):
+    parts = []
+    for f in files:
+        if is_secret(f):
+            sys.exit(f"offload: refusing to send secret-looking file {f}")
+        with open(f, encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().splitlines()
+        parts.append(f"\n=== {f}\n" + "\n".join(f"{i:>5}  {l}" for i, l in enumerate(lines, 1)))
+    return "".join(parts)
+
+
+def run(model, args, prompt, cwd=None):
+    env = dict(os.environ, DEEPSEEK_MODEL=model)
+    start = time.time()
+    p = subprocess.run([WRAPPER, *args], input=prompt, capture_output=True, text=True, env=env, cwd=cwd)
+    out = "\n".join(l for l in (p.stdout + p.stderr).splitlines() if not any(n in l for n in NOISE)).strip()
+    sys.stderr.write(f"[offload: {model}, {time.time() - start:.0f}s]\n")
+    if p.returncode != 0 or any(u in out[:400] for u in UNAVAILABLE) or not out:
+        print(out or "(no output)")
+        sys.exit(75)
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("mode", choices=["ask", "review", "edit", "models"])
+    ap.add_argument("text", nargs="?", default="")
+    ap.add_argument("-m", "--model")
+    ap.add_argument("-f", "--file", action="append", default=[])
+    ap.add_argument("--turns", type=int, default=30)
+    a = ap.parse_args()
+
+    if a.mode == "models":
+        os.execv(WRAPPER, [WRAPPER, "--models"])
+    model = a.model or DEFAULTS[a.mode]
+
+    if a.mode in ("ask", "review"):
+        head = REVIEW + (f"\nFocus: {a.text}" if a.text else "") if a.mode == "review" else a.text
+        if not head:
+            sys.exit("offload: give a question")
+        print(run(model, ["--tools", "", "--max-turns", "3"], head + inline(a.file)))
+        return
+
+    # edit: isolated worktree so uncommitted work in the real checkout is never touched
+    if not a.text:
+        sys.exit("offload: give a task")
+    root = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
+    wt = tempfile.mkdtemp(prefix="offload-wt-")
+    subprocess.run(["git", "-C", root, "worktree", "add", "-q", "--detach", wt, "HEAD"], check=True)
+    task = (a.text + "\n\nWork only inside this repository. Make the smallest correct change. "
+            "When done, reply with a short summary of what you changed and how you verified it.")
+    try:
+        out = run(model, ["--tools", "Read,Grep,Glob,Edit,Write,Bash",
+                          "--allowedTools", "Read,Grep,Glob,Edit,Write,Bash(cargo test:*),Bash(cargo check:*),Bash(cargo clippy:*),Bash(cargo fmt:*),Bash(git diff:*),Bash(git status:*)",
+                          "--max-turns", str(a.turns)], task, cwd=wt)
+    finally:
+        subprocess.run(["git", "-C", wt, "add", "-A", "--", "."], capture_output=True)
+        patch = subprocess.run(["git", "-C", wt, "diff", "--cached", "HEAD"], capture_output=True, text=True).stdout
+        pfile = wt + ".patch"
+        with open(pfile, "w") as fh:
+            fh.write(patch)
+        subprocess.run(["git", "-C", root, "worktree", "remove", "--force", wt], capture_output=True)
+        sys.stderr.write(f"[offload: patch {pfile} ({patch.count(chr(10))} lines); apply with git apply]\n")
+    print(out)
+
+
+if __name__ == "__main__":
+    main()
